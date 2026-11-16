@@ -4,8 +4,15 @@
 > [Hermannmayer/EVE-Online-Industrial-Assistant](https://github.com/Hermannmayer/EVE-Online-Industrial-Assistant)
 > 二次开发（Apache-2.0）。行情、工业指数、合同、图标走曙光 ESI（`datasource=infinity`）；
 > 静态数据来自曙光客户端缓存与曙光 ESI 生成的快照。**不支持国际服**，也不读取国际版的数据目录或授权。
-> 当前处于开发阶段：角色授权（曙光 SSO 客户端）与制造/精炼结果的游戏内核对尚未完成，暂无发行包。
 > 下文功能介绍沿用上游，截图与贸易中心名为国际服示例。
+
+> 🧪 **公开测试版**：到 [Releases](https://github.com/FineTortinita/EVE-Online-Industrial-Assistant-shuguang/releases)
+> 下载 `EVE商人助手-曙光_v*.zip`（标记为 Pre-release 的版本），整个目录解压后双击 exe。
+> 测试期间请注意：
+> - 制造配方、精炼产物、星门跳数取自曙光客户端缓存与曙光 ESI，**尚未与游戏内窗口逐条核对**，
+>   下单前请在游戏里复核关键数字；发现对不上请在 [Issues](https://github.com/FineTortinita/EVE-Online-Industrial-Assistant-shuguang/issues) 附截图反馈。
+> - 角色授权复用网易官方 ESI 文档页的公共客户端，网易若调整该客户端，授权会暂时失效。
+> - 用户数据存于本机，测试版之间可能有数据结构变更，升级前建议在系统设置里「立即备份」。
 
 > **给 EVE Online 工业玩家用的本地桌面工具。** 它回答三个问题：这件东西现在值多少、
 > 自己造划不划算、跨区倒一趟赚不赚 —— 不用再翻网页、对着表格手算。
@@ -401,8 +408,8 @@ powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | ie
 ### 2. 克隆仓库并安装依赖
 
 ```bash
-git clone https://github.com/Hermannmayer/EVE-Online-Industrial-Assistant.git
-cd EVE-Online-Industrial-Assistant
+git clone https://github.com/FineTortinita/EVE-Online-Industrial-Assistant-shuguang.git
+cd EVE-Online-Industrial-Assistant-shuguang
 
 uv sync --dev          # 安装运行 + 开发测试依赖
 
@@ -420,7 +427,7 @@ python Main.py
 python dev.py
 
 # ③ 打包版：双击发行包里的 exe
-python build_release.py            # 打包，产物在 dist/EVE商人助手_v*/ 下
+python build_release.py            # 打包，产物在 dist/EVE商人助手-曙光_v*/ 下
 ```
 
 > 别用裸 `python`。本机 PATH 上的 `python` 可能是不带依赖的系统解释器，
@@ -432,18 +439,23 @@ python build_release.py            # 打包，产物在 dist/EVE商人助手_v*/
 结构改装件数据、蓝图数据、SDE 扩展数据（星系 / 设施）、物品图标等，每步一个状态与进度，
 失败可单步重试，非关键步骤可以跳过；底部是总进度与已用时间。*
 
-首次启动会自动跑一遍数据初始化：建库、从 SDE 拉物品与蓝图数据、拉一份基础价格兜底、
-缓存物品图标。SDE 那一份下载解析比较久，之后就快了。全部就绪时向导会自动关掉。
+首次启动会自动跑一遍数据初始化：建库、下载曙光静态数据快照、拉一份基础价格兜底、
+缓存物品图标。全部就绪时向导会自动关掉。
 
-**打包版注意**：`dist/EVE商人助手_v*/` 里的 `database/` 与 `data/` 必须和 exe 待在一起
-（**整个目录一起解压**）。发行包内置了只读的物品库与蓝图库模板，首启即刻可用，
-不必重新下载解析上百 MB 的 SDE。
+曙光没有官方 SDE：本项目用曙光客户端缓存（蓝图配方、精炼产物）+ 曙光 ESI（物品、星图、星门、NPC 站）
+生成约 18 MB 的快照，发布在本仓库 Release `sde-<build>`，下载后校验 sha256 再导入。
+GitHub 国内直连慢时，应用会**自动使用系统代理**（Clash / v2rayN 等设置的系统代理即可）。
+
+**打包版注意**：`EVE商人助手-曙光_v*/` 里的 `database/` 与 `data/` 必须和 exe 待在一起
+（**整个目录一起解压**）。曙光版数据目录与国际服版本相互隔离，两者可以同时安装。
 
 ### 5.（可选，但推荐）绑定角色
 
 绑定角色后，软件才读得到你**角色上的数据**（钱包余额、未结挂单、技能等级、植入体）：
 
-1. 打开人物设置 → 技能页 → **从 ESI 添加角色**，会开浏览器让你在 EVE 官方登录页授权；
+1. 打开人物设置 → 技能页 → **从 ESI 添加角色**，会开浏览器进入网易曙光登录页；登录授权后
+   浏览器停在一个空白的官方回调页，**把地址栏里的完整地址复制，粘贴回软件弹出的对话框**即可
+   （曙光没有开放回调到本机，所以需要这一步手动粘贴）；
 2. 想在挂单面板里同步钱包余额与未结挂单，用面板上的**从 ESI 同步**；
    想把军团钱包也算进总资产，勾一下「钱包余额含军团钱包」（需要角色的军团会计权限，
    首次开启要重新授权一次）；
@@ -582,6 +594,8 @@ python build_release.py --skip-zip  # 只出目录，不压缩
 
 ## 已知边界
 
+- **曙光版测试期**：配方 / 精炼 / 跳数未与游戏内逐条核对；快照里物品图标、`metaGroups` 名称等
+  曙光 ESI 不提供的字段为空或缺失；贸易中心与截图仍有国际服示例残留。
 - **界面语言是中文**：各页面的按钮、表格列名、提示文案都是中文。
 - **有些功能代码在仓库里，但当前界面没有入口**：贸易评分、批量对比、物品表导出、批量查价
   这几项的服务与界面实现都在，但没有可点到的入口；本文只写当前点得到的部分。
