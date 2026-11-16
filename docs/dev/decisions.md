@@ -18,6 +18,20 @@
 
 `CLAUDE.md` 里六条克制条款是在一次性重写（提交 `d0a8253`，2026-09-17）中整体写入的，条款本身没有出处注释；铁律与测试边界节同理。于是「为什么」只剩在提交历史、审计报告与测试 docstring 里。本页把它们捡回来。**查不到出处的条目写在末尾「无法溯源的决策」，不猜。**
 
+## 曙光分支（2026-11-16）
+
+- 用户选择：只支持 Infinity；首版须包含角色授权与制造核算。自己的 SSO 客户端或配方金样未验证时延后发布，不用其他功能替代发布门槛。
+- 运行时核验：`https://ali-esi.evepc.163.com/latest/status/?datasource=infinity` 返回版本 `3684550`；同主机同时服务 Serenity，所有 ESI 请求显式附带 `datasource=infinity`。端点集中在 `core/constants.py`，不扩展容器。
+- 客户端来源：用户指定 `C:\Games\EVE`。只读 `SharedCache/infinity/start.ini` 与该分支资源索引引用的缓存；build `3684550` 与服务器一致。蓝图资源为 SQLite，5200 条 JSON 配方；98105 对应产品 98001，14 项材料、4 项技能、制造时间 4800000 秒。未完成游戏内数量/税费/时间金样核验。
+- 数据隔离：四库仍按独立安装根存放；日志、崩溃与实例锁使用独立的 `.eve-assistant-shuguang`；任务栏 AppID 与 Qt 应用标识独立。不自动导入国际版 user.db 或令牌；不增加 user schema 版本。
+- 静态数据：本地资源只读提取，原件与导出件分开；仅蓝图素材标记 `complete: false`，不得初始化。完整快照需要服务器身份、build、必需成员与 SHA-256 校验；尚未发布完整快照时不访问虚构的下载地址。
+- 授权路线（2026-11-16 用户确认，替代上一版的「自己申请 client_id」）：网易没有公开的曙光开发者门户（`developers*.evepc.163.com` 不存在）。实测现有曙光工具并非自行注册：网易官方 ESI 文档页 `https://ali-esi.evepc.163.com/ui/` 内联 `configureAuth({clientId: "bc90aa496a404724a93f41b4f4e97761", realm: "ESI"})`（曙光 / 晨曦共用），eve.navexor.top 的 `/api/esi/config?server=infinity` 返回同一 client_id 与回调 `https://ali-esi.evepc.163.com/ui/oauth2-redirect.html`，开明网是「登录后把空白页地址粘贴回来」的流程。本应用照此实现：复用官方公共客户端 + 官方回调页 + 手动粘贴回跳地址；PKCE、state 逐字校验、只接受官方回调页地址；换令牌与刷新都带 `redirect_uri`（navexor 注释：「网易换令牌要求带回调地址」）。不再使用 localhost 回环回调。
+- 系统代理（2026-11-16，用户要求「自发现系统代理，参考成熟项目」）：新增 `core/net_proxy.py`，所有 `aiohttp.ClientSession` 传 `middlewares=PROXY_MIDDLEWARES`。按请求选代理，优先级照 requests / pip：环境变量 `HTTP(S)_PROXY` + `NO_PROXY` 优先；否则查 `QNetworkProxyFactory.systemProxyForQuery`（Windows 上即 WinHTTP，覆盖手动代理 / PAC / WPAD / 例外列表，Qt / Chromium 系应用同款）。不用 aiohttp `trust_env`：它走 `urllib.getproxies()`，不支持 PAC / WPAD。只接 HTTP 代理（SOCKS 需额外依赖 aiohttp-socks，Clash / v2rayN 写进系统代理的是 HTTP 混合端口），SOCKS 记日志后直连；按主机缓存 5 分钟；中间件在重定向后也会再选一次（GitHub 302 到 `release-assets.githubusercontent.com` 实测也走代理）；`EVE_NO_SYSTEM_PROXY=1` 关闭。实测：临时写入 WinINET 系统代理 → 本地 CONNECT 代理依次看到 `github.com:443`、`release-assets.githubusercontent.com:443`，下载返回 206 + `PK` 头，注册表随后恢复原值。
+- 网易登录的两个前置条件（2026-11-16 用户首次实测报 `{"Message":"An error has occurred."}` 后补）：① 授权地址必须带 `device_id`，来自 `GET https://mpay-web.g.mkey.163.com/device/init`（参数照抄官方文档页 bundle 的 `configureAuth`：`game_id=aecfu6bgiuaaaal2-g-ma79` 等；该接口只接受 `Origin: https://ali-esi.evepc.163.com`，不带 Origin 返回 500）；② 先经 `/account/logoff?returnUrl=…` 清掉残留网易会话（navexor / ceve-market 同款）。未登录对比：缺 device_id → 跳到 `/error`；加上后 → 正常到 `/account/neteaselogon` 登录页。
+- 实测通过（2026-11-16，用户测试角色，`python -m scripts.sso_live_check`）：设备 ID 申请成功 → 授权回跳校验通过 → 换令牌 HTTP 200（access_token 1057 字符、expires_in 1199）→ 刷新 HTTP 200（refresh_token **未轮换**，代码对轮换 / 不轮换都兼容）→ `/characters/{id}/skills/` HTTP 200（360 条技能）。令牌 claims：`iss=login-infinity.evepc.163.com`、`azp=bc90aa49…`、`sub=CHARACTER:EVE:<id>`、`tenant=infinity`、`region=china`、`scp` 为所请求的 5 个 scope，**没有 `aud`**。据此校验规则定为：iss 必须是曙光、exp 未过期、azp 等于 client_id、带 tenant 时必须是 infinity。JWT 解码与 claims 检查不等同于验签。
+- 发布门槛：数据齐备、制造金样、授权闭环及干净 Windows 验收全部通过后才能发布。客户端提取数据的再分发：2026-11-16 用户确认「数据可以再分发」，快照可作为 Release 资产上传（上传动作本身仍由用户执行或明确指示）。
+- 维护：保留 Apache-2.0 许可证和原作者声明，单独标识曙光产品与版本；不将仅替换 URL 表述为已完成适配。
+
 ## 条目索引
 
 | 编号 | 标题 | 状态 | 现行约束 |

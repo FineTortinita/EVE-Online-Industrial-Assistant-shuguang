@@ -1,4 +1,11 @@
-# EVE 商人助手
+# EVE 商人助手 · 曙光版
+
+> ⚠️ **本分支仅适用于网易《星战前夜：晨曦》曙光服（Infinity）**，基于
+> [Hermannmayer/EVE-Online-Industrial-Assistant](https://github.com/Hermannmayer/EVE-Online-Industrial-Assistant)
+> 二次开发（Apache-2.0）。行情、工业指数、合同、图标走曙光 ESI（`datasource=infinity`）；
+> 静态数据来自曙光客户端缓存与曙光 ESI 生成的快照。**不支持国际服**，也不读取国际版的数据目录或授权。
+> 当前处于开发阶段：角色授权（曙光 SSO 客户端）与制造/精炼结果的游戏内核对尚未完成，暂无发行包。
+> 下文功能介绍沿用上游，截图与贸易中心名为国际服示例。
 
 > **给 EVE Online 工业玩家用的本地桌面工具。** 它回答三个问题：这件东西现在值多少、
 > 自己造划不划算、跨区倒一趟赚不赚 —— 不用再翻网页、对着表格手算。

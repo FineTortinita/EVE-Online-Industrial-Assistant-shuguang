@@ -797,6 +797,65 @@
   （两处都是函数内 import，patch 源模块即生效，不动生产代码）。
 - 复验：`pytest tests/test_qt_noise.py -q` → 3 passed；CI 以下一轮 run 为准。
 
+## BL-046 Hek 贸易中心的 region_id 写成了 Molden Heath
+
+- 类型：缺陷
+- 状态：已关闭（曙光分支 `feat/shuguang-p1`，待提交）
+- 证据：`core/constants.py` 原 `"Hek": 10000028`；ESI 实测星系 30002053（Hek）→ 星座 → 区域 `10000042` Metropolis，
+  而 `10000028` 是 Molden Heath。国际服 `datasource=tranquility` 与曙光 `datasource=infinity` 结果一致，上游同样存在该缺陷。
+- 影响：「Hek」价格、成交量、价差全部取自错误星域。
+- 修法：`TRADE_HUB_IDS["Hek"] = 10000042`（`scripts/build_demo_data.py` 同步）；回归在 `tests/test_constants.py`。可回馈上游。
+
+## BL-047 曙光分支发布阻断项（外部输入）
+
+- 类型：待决策 / 外部条件
+- 状态：deferred
+- 证据与现状：
+  - SSO：复用网易官方 ESI 文档页的公共客户端（`bc90aa49…`）+ 官方回调页 + 手动粘贴回跳地址，
+    授权地址带网易设备 ID 并先登出残留会话（依据见 `docs/dev/decisions.md`「曙光分支」）。
+    **脚本实测已通过**（2026-11-16）：换令牌 / 刷新 / 技能接口均 HTTP 200。
+    剩余：在应用界面里走一遍「人物设置 → + 从 ESI」与「同步钱包 / 挂单」（脚本没覆盖粘贴对话框和落库）。
+    风险：该 client_id 属于网易官方文档工具，网易若更换或限制它，现有曙光工具与本应用会一起失效。
+  - 静态数据：`python -m scripts.build_infinity_sde` 完整模式 = 客户端蓝图（SQLite）+ 客户端精炼产物
+    （`scripts/infinity_fsd.py`）+ 曙光 ESI 导出（`scripts/infinity_esi_export.py`），给齐全部成员才标
+    `complete: true`；`--blueprints-only` 仍产出 `complete: false`，运行时拒绝。
+    ESI 不提供 `icons` / `stationOperations` / `stationServices`，导出为空字典（导入器对空数据跳过并告警）；
+    `metaGroups` 只有 ID 没有名称（ESI 无对应接口）。
+  - 精炼：`typematerials.fsdbinary` 已按哈希桶结构严格解析——桶数 16204、条目 10803，遍历数与头部计数完全一致；
+    此前扫描少的 310 条 = 300 条两列表皆空 + 10 条仅含 randomized 材料。抽样 1230 凡晶石 → 34×400、
+    587 裂谷级 → 34×13333/35×3333/36×1333，**尚未与游戏内精炼窗口逐条核对**；文件头 24 字节未解释。
+  - 首个完整快照已在开发机生成并验证（2026-11-16，未上传）：build `3684550`，16.3 MB，
+    sha256 `63e0e38a9077e89eb380b9827cd463e8dae8030a3eeabebed258db969014bea4`，ESI 请求 146,266 次。
+    成员规模：types 34,879（已发布 + 蓝图引用）/ groups 1,921 / marketGroups 2,800 / 星系 8,630 /
+    NPC 站 5,256 / typeMaterials 10,493 / 蓝图 5,200。`verify_snapshot` 带 sha 校验通过。
+    隔离根 `EVE_ASSISTANT_APP_ROOT` + `EVE_SDE_ZIP_URL=file:///…` 跑 `Main.py --init-only`：
+    schema / items / blueprints / sde_core / sde_data 全部 OK，耗时 11s；98105 → 98001 配方 14 种材料与客户端一致，
+    吉他星系 / 吉他 4-4 站 / 凡晶石精炼正确入库。
+  - 首次真实安装实测（2026-11-16）暴露并已修：静态数据缺表时合同页 `region_name` / 人物设置
+    `load_implants` 抛未捕获异常（改为降级）；`write_region_names` 只 UPDATE 不 INSERT，全新库 region 表永远 0 行
+    （改为从快照 `mapRegions.yaml` 补行，117 个星域）。
+  - 星门（2026-11-16 已补）：导出 `mapStargates.yaml`（曙光 ESI 逐个拉取，10,837 个），新增导入步骤 `write_stargates`，
+    快照必需成员同步加入。新快照 r2：17.5 MB，sha256 `964e577ee08ef9ff7d11b0c9a1005901db938d8363ee3383e252f89a7c994ae0`。
+    星门图覆盖 3,742 个星系，目标星门无悬空；1 对单向（MJYW-3 → 6Z9-0M，ESI 原样）。
+    抽查跳数 吉他→艾玛 11、吉他→多迪谢 8、吉他→伦斯 7（曙光的 Niarja 安全等级 -1.0）——**未与游戏内星图核对**。
+    `constellation` 表仍为 0 行，无业务读取。
+  - 真实库测试改曙光口径（2026-11-16，用户决定）：`tests/test_logistics_distance.py` 的 10 对贸易中心跳数
+    改为曙光星门图 BFS 推出的值（**未经游戏核对**；曙光 ESI `/route/` 恒 404，无法交叉验证）。技能面板去掉曙光
+    没有的贝兹岩 / 拉克岩 / 塔拉岩处理技术；「高级旗舰建造」改为曙光译名「高级旗舰建造研究」（`_LEGACY_SKILL_KEYS`
+    搬旧值）；补上曙光蓝图要求、面板缺失的 7 个技能并在 terminology.json 注册。
+  - 合同页首次打开报 `no such table: public_contracts`（已捕获、只记日志）：上游行为，表在首次点「刷新」拉合同时创建。
+  - 已知数据缺口：蓝图引用的 20 个制造产物（37236–37286 段）与 1 种材料（3924）在曙光 ESI 返回 404，
+    item 表没有它们的名字（占 4,988 条制造配方的 0.4%）。
+  - `ITEMS_NAMED_READY` 由 50000 降到 30000：曙光只收已发布物品（34,879 条），旧阈值会让每次启动都判「未就绪」重导。
+  - 发布配置：产物 `EVE商人助手-曙光_v*.zip`，tag `shuguang-vX.Y.Z`（`pyproject.toml` / `release.yml` /
+    `scripts/check_version.py` 已同步）。
+  - 再分发：用户已确认可以（2026-11-16）。快照 r2 已发布为预发布 Release
+    [`sde-3684550`](https://github.com/FineTortinita/EVE-Online-Industrial-Assistant-shuguang/releases/tag/sde-3684550)
+    （不标最新），`INFINITY_SDE_BUILD` / `INFINITY_SDE_SHA256` 已填。验证：公开地址下载 sha256 一致；
+    不设 `EVE_SDE_ZIP_URL` 的全新隔离根 `Main.py --init-only` 从 GitHub 下载 → 校验 → 5 步全 OK（16s），
+    星门 10,837 / 星域 117 入库。
+- 下一步：发布快照资产并填 build/sha → 制造与精炼金样 → 授权实测 → 干净 Windows 验收。
+
 
 
 
