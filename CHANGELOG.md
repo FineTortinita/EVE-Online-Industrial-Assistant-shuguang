@@ -6,6 +6,41 @@
 
 <!-- version list -->
 
+## v0.28.0 (2026-11-16)
+
+### Bug Fixes
+
+- **曙光**: 技能面板与物流跳数改为曙光口径
+  ([`06bff91`](https://github.com/FineTortinita/EVE-Online-Industrial-Assistant-shuguang/commit/06bff91e58b6d7e30eb8ffc11d631d7cebfdbd86))
+
+### Continuous Integration
+
+- **曙光**: 发行包改名 EVE商人助手-曙光，tag 前缀 shuguang-v
+  ([`221a38d`](https://github.com/FineTortinita/EVE-Online-Industrial-Assistant-shuguang/commit/221a38d40b47b085cd0e264c37a1fdb3a034164e))
+
+### Documentation
+
+- **曙光**: README 改为公开测试版说明（下载、授权粘贴步骤、快照与已知边界）
+  ([`bc93156`](https://github.com/FineTortinita/EVE-Online-Industrial-Assistant-shuguang/commit/bc93156205c5222563f99d2882bd000d97ce2636))
+
+- **曙光**: 分支定位、决策记录与发布门槛台账
+  ([`bdfd887`](https://github.com/FineTortinita/EVE-Online-Industrial-Assistant-shuguang/commit/bdfd88711640d4197aaddfb34983d799f8d71140))
+
+### Features
+
+- **曙光**: 数据目录隔离 + 全部公开 ESI 改走曙光（datasource=infinity）
+  ([`81453c0`](https://github.com/FineTortinita/EVE-Online-Industrial-Assistant-shuguang/commit/81453c0af0679c79e1e54ff3b12b8a802d06ecf0))
+
+- **曙光**: 角色授权（网易官方公共客户端 + 粘贴回跳地址）
+  ([`0230501`](https://github.com/FineTortinita/EVE-Online-Industrial-Assistant-shuguang/commit/0230501bb68163fb3b530f4f4330ab4a5f452aea))
+
+- **曙光**: 静态数据快照（客户端缓存 + 曙光 ESI），首装从 GitHub Release 下载
+  ([`1d4f4cd`](https://github.com/FineTortinita/EVE-Online-Industrial-Assistant-shuguang/commit/1d4f4cdbc882e0d0b5660fc2e08cf577694ca28c))
+
+- **网络**: 自动发现系统代理（环境变量优先，否则走 WinHTTP 系统设置）
+  ([`b72b933`](https://github.com/FineTortinita/EVE-Online-Industrial-Assistant-shuguang/commit/b72b9338998c96d75907697201da2d077db58bdc))
+
+
 ## v0.27.1 (2026-11-12)
 
 ### Bug Fixes
