@@ -1,0 +1,50 @@
+name: 数据／计算错误
+description: 报告曙光服物品、配方、精炼、价格、工业费用或跳数等数据不符。
+title: "[数据] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请使用曙光服（Infinity）的游戏内数据作对照，并先搜索已有 Issue。
+        截图请保留相关数值与设置，遮盖账号、角色等个人信息；不要上传授权凭据或完整用户数据库。
+  - type: input
+    id: version
+    attributes:
+      label: 软件版本
+      description: 填写完整发布版本；源码运行请填写分支和 commit。
+      placeholder: "shuguang-v… / commit …"
+    validations:
+      required: true
+  - type: input
+    id: item
+    attributes:
+      label: 涉及的物品、蓝图或星系
+      description: 提供准确名称，能获取 Type ID 时请一并填写。
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: 操作步骤与计算条件
+      description: 写明功能页面和复现步骤，按问题补充数量、流程数、蓝图 ME/TE、技能等级、设施加成／税率、星系、贸易中心、买卖价口径及数据更新时间。
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 软件显示的结果
+      description: 请填写具体数值和单位，可附截图。
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期结果与对照依据
+      description: 提供曙光服游戏内数值、截图或可核对的来源；涉及行情时请注明观察时间与地点。手动计算请列出公式及输入。
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: 补充信息
+      description: 例如刷新数据前后的差异、其他受影响物品、相关日志。

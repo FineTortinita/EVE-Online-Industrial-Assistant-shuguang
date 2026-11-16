@@ -1,0 +1,55 @@
+name: Issue 自动标签
+
+on:
+  issues:
+    types: [opened, edited, reopened]
+
+permissions:
+  issues: write
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: 根据标题前缀添加分类标签
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            // 从事件数据读取标题，不将用户输入插入脚本源码。
+            const title = context.payload.issue.title.trimStart();
+            const rules = [
+              { prefix: '[Bug]', name: 'bug', color: 'd73a4a', description: '软件缺陷与运行异常' },
+              { prefix: '[数据]', name: 'data', color: '0075ca', description: '曙光服数据或计算结果不符' },
+              { prefix: '[建议]', name: 'enhancement', color: 'a2eeef', description: '功能需求与体验改进' },
+            ];
+            const rule = rules.find(({ prefix }) => title.toLowerCase().startsWith(prefix.toLowerCase()));
+            if (!rule) {
+              core.info('标题未匹配模板前缀，跳过自动标签。');
+              return;
+            }
+
+            const label = { owner, repo, name: rule.name };
+            try {
+              await github.rest.issues.getLabel(label);
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              try {
+                await github.rest.issues.createLabel({
+                  ...label, color: rule.color, description: rule.description,
+                });
+              } catch (createError) {
+                if (createError.status !== 422) throw createError;
+                // 多个 Issue 同时创建标签时，确认标签已存在才继续。
+                await github.rest.issues.getLabel(label);
+              }
+            }
+
+            // 只添加当前分类，保留维护者设置的其他标签。
+            await github.rest.issues.addLabels({
+              owner, repo,
+              issue_number: context.payload.issue.number,
+              labels: [rule.name],
+            });
+            core.info(`已添加标签：${rule.name}`);

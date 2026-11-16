@@ -1,0 +1,55 @@
+name: 问题反馈
+description: 报告启动失败、闪退、界面异常、更新或角色授权等问题。
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈！本项目仅适用于网易曙光服（Infinity）。请先搜索已有 Issue，避免重复提交。
+        配方、价格或计算结果不符，请使用「数据／计算错误」模板。
+        日志和截图请先打码，不要上传 access_token、refresh_token、授权码或完整用户数据库。
+  - type: input
+    id: version
+    attributes:
+      label: 软件版本
+      description: 填写完整发布版本；源码运行请填写分支和 commit。
+      placeholder: "shuguang-v… / commit …"
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: 系统与运行方式
+      placeholder: "Windows 11 24H2，Release 安装包解压运行 / 源码运行（Python、PySide6 版本）"
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 从打开软件开始，描述进入的页面、操作和触发条件；偶发问题请说明频率。
+      placeholder: |
+        1. 打开……
+        2. 点击……
+        3. 出现……
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期结果
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际结果
+      description: 请提供完整错误提示；可以拖入截图。
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志与补充信息
+      description: 粘贴问题发生时的相关日志。网络或授权问题请补充发生时间、失败的操作及是否使用代理；升级后出现的问题请补充旧版本。
+      render: text
