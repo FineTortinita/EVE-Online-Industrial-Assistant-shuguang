@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import aiohttp
 import pytest
 
-from services.importers.geticon import ICON_SIZE, download_all, download_icon
+from services.importers.geticon import download_all, download_icon
 
 
 class TestDownloadIconCacheHit:
@@ -59,7 +59,7 @@ class TestDownloadIconSuccess:
         assert result is True
         assert progress == [1, 1]  # total +1, new_downloads +1
         session.get.assert_called_once_with(
-            f"https://images.evetech.net/types/12345/icon?size={ICON_SIZE}",
+            "https://image.evepc.163.com/Type/12345_64.png",
             timeout=aiohttp.ClientTimeout(total=15),
         )
         written = (tmp_path / "12345.png").read_bytes()

@@ -16,6 +16,7 @@ from contextlib import asynccontextmanager
 import aiosqlite
 from tqdm import tqdm
 
+from core.constants import esi_url
 from core.logger import log
 from core.paths import reference_db_path
 from services.db_locks import get_db_write_lock
@@ -332,9 +333,7 @@ async def fill_missing_blueprint_names():
 
     async def _fetch_one(client: APIClient, tid: int) -> tuple[int, str, str] | None:
         async def _get(lang: str) -> str:
-            data = await client.fetch(
-                f"https://esi.evetech.net/latest/universe/types/{tid}/?datasource=tranquility&language={lang}"
-            )
+            data = await client.fetch(esi_url(f"/universe/types/{tid}/", language=lang))
             return _esi_name(data)
 
         zh, en = await asyncio.gather(_get("zh"), _get("en"))
@@ -401,10 +400,9 @@ async def fill_missing_item_names_from_esi(progress_cb: Callable[[int, str], Non
 
     async def _fetch_one(client: APIClient, tid: int) -> tuple[int, str, str]:
         """并发获取单个物品的 zh + en 名称"""
-        base = f"https://esi.evetech.net/latest/universe/types/{tid}/?datasource=tranquility&language="
 
         async def _get(lang: str) -> str:
-            data = await client.fetch(base + lang)
+            data = await client.fetch(esi_url(f"/universe/types/{tid}/", language=lang))
             return (data or {}).get("name", "") or ""
 
         zh, en = await asyncio.gather(_get("zh"), _get("en"))

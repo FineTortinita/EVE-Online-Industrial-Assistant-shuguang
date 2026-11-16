@@ -7,12 +7,13 @@
 """
 
 import asyncio
+import hashlib
 import io
 import json
 import os
 import time
 import zipfile
-from unittest.mock import AsyncMock, MagicMock, mock_open, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import yaml
@@ -27,6 +28,39 @@ from services.importers.sde_cache import (
 )
 
 pytestmark = pytest.mark.fast
+
+
+@pytest.fixture(autouse=True)
+def isolated_sde_environment(tmp_path, monkeypatch):
+    from services.importers import sde_cache
+
+    monkeypatch.setenv(sde_cache.SDE_SOURCE_ENV, "static-data")
+    monkeypatch.setenv(sde_cache.SDE_ZIP_URL_ENV, "https://snapshot.invalid/infinity.zip")
+    monkeypatch.setattr(sde_cache, "CACHE_DIR", str(tmp_path))
+    monkeypatch.setattr(sde_cache, "SDE_ZIP_PATH", str(tmp_path / "sde.zip"))
+    monkeypatch.setattr(sde_cache, "ZIP_PART_PATH", str(tmp_path / "sde.zip.part"))
+    monkeypatch.setattr(sde_cache, "MANIFEST_PATH", str(tmp_path / "manifest.json"))
+    monkeypatch.setattr(sde_cache, "INFINITY_SDE_SHA256", "")
+
+
+def _complete_snapshot(*, metadata=None, skip=None):
+    from services.importers.sde_cache import STATIC_DATA_ZIP_NAMES
+
+    info = {"server": "infinity", "buildNumber": 1, "complete": True}
+    info.update(metadata or {})
+    members = set(STATIC_DATA_ZIP_NAMES.values()) | {
+        "blueprints.yaml",
+        "mapRegions.yaml",
+        "mapConstellations.yaml",
+        "mapSolarSystems.yaml",
+        "mapStargates.yaml",
+    }
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("_sde.yaml", yaml.safe_dump({"sde": info}))
+        for name in sorted(members - {skip}):
+            zf.writestr(name, "key: value")
+    return buf.getvalue()
 
 
 def _make_mini_universe_zip():
@@ -411,15 +445,13 @@ class TestUniverseCacheSelfHeal:
 
 
 class TestEnsureSdeZip:
-    """ensure_sde_zip — 断点续传 + 完整性校验"""
+    """ensure_sde_zip — 断点续传 + 曙光快照完整性校验（全程假 HTTP）"""
 
     @staticmethod
     def _mock_http(session_cls, status, headers, chunks):
-        """构造 aiohttp.ClientSession mock 链"""
         mock_resp = MagicMock()
         mock_resp.status = status
         mock_resp.headers = headers
-        mock_resp.content = MagicMock()
 
         async def _chunks():
             for c in chunks:
@@ -427,7 +459,6 @@ class TestEnsureSdeZip:
 
         mock_resp.content.iter_chunked.return_value = _chunks()
         mock_resp.raise_for_status = MagicMock()
-
         mock_cm = MagicMock()
         mock_cm.__aenter__ = AsyncMock(return_value=mock_resp)
         mock_cm.__aexit__ = AsyncMock(return_value=False)
@@ -438,68 +469,58 @@ class TestEnsureSdeZip:
         return mock_session
 
     @pytest.mark.asyncio
-    @patch("services.importers.sde_cache.os.path.exists")
-    @patch("services.importers.sde_cache.os.path.getsize")
-    @patch("services.importers.sde_cache.os.replace")
-    @patch("zipfile.ZipFile")
-    @patch("services.importers.sde_cache.open", new_callable=mock_open)
     @patch("services.importers.sde_cache.aiohttp.ClientSession")
-    async def test_resume_with_range(
-        self, mock_session_cls, mock_file, mock_zf, mock_replace, mock_getsize, mock_exists
-    ):
-        """SDE_ZIP_PATH 不存在但 .part 残留 → Range 续传 + 追加模式 + 原子 rename"""
-        from services.importers.sde_cache import SDE_ZIP_PATH, ZIP_PART_PATH
+    async def test_resume_with_range(self, mock_session_cls, tmp_path):
+        """只有 .part 断点 → Range 续传、追加写入、校验通过后原子替换。"""
+        from services.importers import sde_cache
 
-        # 首次 exists 判断 SDE_ZIP_PATH → False；ZIP_PART_PATH → True（断点）
-        mock_exists.side_effect = [False, True]
-        mock_getsize.return_value = 5000  # 已下载 5000 字节
-
-        # zip 完整性校验通过
-        mock_zf_instance = MagicMock()
-        mock_zf_instance.testzip.return_value = None
-        mock_zf.return_value.__enter__.return_value = mock_zf_instance
-
+        data = _complete_snapshot()
+        cut = len(data) // 2
+        part = tmp_path / "sde.zip.part"
+        part.write_bytes(data[:cut])
         mock_session = self._mock_http(
-            mock_session_cls, 206, {"Content-Range": "bytes=5000-117964799/117964800"}, [b"x"]
+            mock_session_cls, 206, {"Content-Range": f"bytes {cut}-{len(data) - 1}/{len(data)}"}, [data[cut:]]
         )
 
-        result = await ensure_sde_zip()
+        assert await ensure_sde_zip() == sde_cache.SDE_ZIP_PATH
+        assert mock_session.get.call_args.kwargs["headers"] == {"Range": f"bytes={cut}-"}
+        assert (tmp_path / "sde.zip").read_bytes() == data
+        assert not part.exists()
 
-        assert result == SDE_ZIP_PATH
-        # Range 头带断点偏移
-        _args, kwargs = mock_session.get.call_args
-        assert kwargs["headers"] == {"Range": "bytes=5000-"}
-        # 追加模式写 .part
-        assert mock_file.call_args[0] == (ZIP_PART_PATH, "ab")
-        # 原子 rename 完成
-        mock_replace.assert_called_once_with(ZIP_PART_PATH, SDE_ZIP_PATH)
+    @pytest.mark.parametrize(
+        ("payload", "expected_sha", "match"),
+        [
+            (b"not a zip", None, "zip"),
+            (_complete_snapshot(metadata={"server": "tranquility"}), None, "曙光"),
+            (_complete_snapshot(metadata={"buildNumber": 0}), None, "buildNumber"),
+            (_complete_snapshot(metadata={"complete": False}), None, "不完整"),
+            (_complete_snapshot(skip="mapSolarSystems.yaml"), None, "mapSolarSystems.yaml"),
+            (_complete_snapshot(), "0" * 64, "sha256"),
+        ],
+        ids=["bad-zip", "wrong-server", "bad-build", "blueprints-only", "missing-member", "sha-mismatch"],
+    )
+    def test_invalid_downloaded_snapshot_deletes_part(self, tmp_path, monkeypatch, payload, expected_sha, match):
+        """来源/sha/完整性任一不符 → 删除 .part，不产出 sde.zip。"""
+        from services.importers import sde_cache
 
-    @pytest.mark.asyncio
-    @patch("services.importers.sde_cache.os.path.exists")
-    @patch("services.importers.sde_cache.os.remove")
-    @patch("zipfile.ZipFile")
-    @patch("services.importers.sde_cache.open", new_callable=mock_open)
-    @patch("services.importers.sde_cache.aiohttp.ClientSession")
-    async def test_zip_integrity_failure_deletes_part(
-        self, mock_session_cls, mock_file, mock_zf, mock_remove, mock_exists
-    ):
-        """下载完成后 testzip 校验损坏 → 删 .part 并抛错（下次从头下载）"""
-        from services.importers.sde_cache import ZIP_PART_PATH
+        if expected_sha:
+            monkeypatch.delenv(sde_cache.SDE_ZIP_URL_ENV)
+            monkeypatch.setattr(sde_cache, "INFINITY_SDE_SHA256", expected_sha)
+        (tmp_path / "sde.zip.part").write_bytes(payload)
+        with pytest.raises((zipfile.BadZipFile, RuntimeError), match=match):
+            sde_cache._validate_and_finalize()
+        assert not (tmp_path / "sde.zip.part").exists()
+        assert not (tmp_path / "sde.zip").exists()
 
-        # SDE_ZIP_PATH 与 ZIP_PART_PATH 都不存在 → 全量下载
-        mock_exists.side_effect = [False, False]
+    def test_complete_snapshot_accepts_matching_sha(self, tmp_path, monkeypatch):
+        from services.importers import sde_cache
 
-        # zip 校验失败（testzip 返回损坏成员名）
-        mock_zf_instance = MagicMock()
-        mock_zf_instance.testzip.return_value = "some_bad_member"
-        mock_zf.return_value.__enter__.return_value = mock_zf_instance
-
-        self._mock_http(mock_session_cls, 200, {"Content-Length": "100"}, [b"x"])
-
-        with pytest.raises(zipfile.BadZipFile):
-            await ensure_sde_zip()
-        # 损坏的 .part 被删除
-        mock_remove.assert_called_once_with(ZIP_PART_PATH)
+        data = _complete_snapshot()
+        monkeypatch.delenv(sde_cache.SDE_ZIP_URL_ENV)
+        monkeypatch.setattr(sde_cache, "INFINITY_SDE_SHA256", hashlib.sha256(data).hexdigest().upper())
+        (tmp_path / "sde.zip.part").write_bytes(data)
+        sde_cache._validate_and_finalize()
+        assert (tmp_path / "sde.zip").read_bytes() == data
 
 
 class TestLoadYamlAsync:
@@ -530,19 +551,24 @@ class TestSdeCacheManifest:
     """完成标记：只有全部 YAML 原子落盘后才算缓存完整（P1-1 回归）"""
 
     def _stage(self, tmp_path, monkeypatch, manifest: bool):
-        """把 cache_path / MANIFEST_PATH / SDE_ZIP_PATH 指到临时目录，并造出全部 YAML"""
-        from services.importers.sde_cache import YAML_FILES
+        """把 cache_path / MANIFEST_PATH / SDE_ZIP_PATH 指到临时目录，并造出当前源要求的全部 YAML。
+
+        曙光运行时固定 static-data 源，所以按 `yaml_files_for()` 造文件，
+        不能用 legacy 全集 `YAML_FILES`（多出的 agents 等文件会让「删一个文件」删错对象）。
+        """
+        from services.importers.sde_cache import yaml_files_for
 
         monkeypatch.setattr("services.importers.sde_cache.cache_path", lambda name: str(tmp_path / name))
         monkeypatch.setattr("services.importers.sde_cache.MANIFEST_PATH", str(tmp_path / "manifest.json"))
         monkeypatch.setattr("services.importers.sde_cache.SDE_ZIP_PATH", str(tmp_path / "sde.zip"))
-        for fname in YAML_FILES:
+        fnames = yaml_files_for()
+        for fname in fnames:
             (tmp_path / fname).write_text("key: value", encoding="utf-8")
         if manifest:
             from services.importers.sde_cache import _write_manifest
 
             _write_manifest()
-        return YAML_FILES
+        return fnames
 
     def test_all_cached_requires_manifest(self, tmp_path, monkeypatch):
         """文件全在但没有完成标记 → 不算完整（旧实现会误判为完整缓存）"""
@@ -600,15 +626,9 @@ class TestSdeCacheManifest:
         assert dest.read_text(encoding="utf-8") == "old"
 
     def _mini_zip(self, tmp_path, skip: str | None = None):
-        """构造含全部 YAML_FILES 成员的 mini zip（成员名走 ZIP_LOOKUP 映射）"""
-        from services.importers.sde_cache import YAML_FILES, ZIP_LOOKUP
-
+        """最小完整曙光快照（可去掉一个必需成员）。"""
         zip_path = tmp_path / "sde.zip"
-        with zipfile.ZipFile(zip_path, "w") as zf:
-            for fname in YAML_FILES:
-                if fname == skip:
-                    continue
-                zf.writestr(f"fsd/{ZIP_LOOKUP.get(fname, fname)}", "key: value")
+        zip_path.write_bytes(_complete_snapshot(skip=skip))
         return zip_path
 
     def test_backfill_manifest_when_sizes_match(self, tmp_path, monkeypatch):
@@ -658,22 +678,20 @@ class TestSdeCacheManifest:
         assert sde_cache._zip_is_usable() is False
         assert not zip_path.exists()
 
-    def test_extract_missing_member_writes_no_manifest(self, tmp_path, monkeypatch):
-        """zip 缺成员 → 不写完成标记，下次启动重新提取"""
+    def test_incomplete_local_snapshot_is_dropped_before_extract(self, tmp_path, monkeypatch):
+        """本地快照缺必需成员 → 删除并走下载（下载在单测里替身失败），不写完成标记。"""
         from services.importers import sde_cache
-        from services.importers.sde_cache import YAML_FILES
 
         monkeypatch.setattr(sde_cache, "cache_path", lambda name: str(tmp_path / name))
-        monkeypatch.setattr(sde_cache, "MANIFEST_PATH", str(tmp_path / "manifest.json"))
-        monkeypatch.setattr(sde_cache, "SDE_ZIP_PATH", str(self._mini_zip(tmp_path, skip="agents.yaml")))
-        monkeypatch.setattr(sde_cache, "_download_zip", AsyncMock())
+        zip_path = self._mini_zip(tmp_path, skip="types.yaml")
+        monkeypatch.setattr(sde_cache, "_download_zip", AsyncMock(side_effect=RuntimeError("offline")))
 
-        asyncio.run(sde_cache._download_and_extract())
+        with pytest.raises(RuntimeError, match="offline"):
+            asyncio.run(sde_cache._download_and_extract())
 
+        assert not zip_path.exists()
         assert not (tmp_path / "manifest.json").exists()
         assert sde_cache._all_cached() is False
-        assert not (tmp_path / "agents.yaml").exists()
-        assert len([f for f in YAML_FILES if (tmp_path / f).exists()]) == len(YAML_FILES) - 1
 
 
 class TestDownloadZipRetry:
@@ -696,11 +714,11 @@ class TestDownloadZipRetry:
         cm.__aexit__ = AsyncMock(return_value=False)
         return cm
 
-    def _patch_env(self, tmp_path, monkeypatch, session_cls, responses):
+    def _patch_env(self, tmp_path, monkeypatch, session_cls, responses, head: bytes = b"x" * 5000):
         from services.importers import sde_cache
 
         part = tmp_path / "sde.zip.part"
-        part.write_bytes(b"x" * 5000)  # 已下载 5000 字节的断点
+        part.write_bytes(head)  # 已下载的断点
         monkeypatch.setattr(sde_cache, "ZIP_PART_PATH", str(part))
         monkeypatch.setattr(sde_cache, "SDE_ZIP_PATH", str(tmp_path / "sde.zip"))
         monkeypatch.setattr(sde_cache.asyncio, "sleep", AsyncMock())
@@ -711,28 +729,33 @@ class TestDownloadZipRetry:
         return sde_cache, part, session
 
     @pytest.mark.asyncio
-    @patch("zipfile.ZipFile")
     @patch("services.importers.sde_cache.aiohttp.ClientSession")
-    async def test_429_waits_then_resumes(self, session_cls, mock_zf, tmp_path, monkeypatch):
-        """首次 429（带 Retry-After）→ 等待后按原 Range 续传成功"""
-        mock_zf.return_value.__enter__.return_value.testzip.return_value = None
+    async def test_429_waits_then_resumes(self, session_cls, tmp_path, monkeypatch):
+        """首次 429（带 Retry-After）→ 等待后按原 Range 续传成功。
+
+        用真实的完整快照字节，不 mock `zipfile.ZipFile`：快照校验会真的读包并算 sha，
+        全局 mock 掉 ZipFile 会让读循环拿不到 EOF（曾导致测试挂起并耗尽内存）。
+        """
+        data = _complete_snapshot()
+        cut = len(data) // 2
         sde_cache, _part, session = self._patch_env(
             tmp_path,
             monkeypatch,
             session_cls,
             [
                 (429, {"Retry-After": "1"}, []),
-                (206, {"Content-Range": "bytes=5000-117964799/117964800"}, [b"x"]),
+                (206, {"Content-Range": f"bytes {cut}-{len(data) - 1}/{len(data)}"}, [data[cut:]]),
             ],
+            head=data[:cut],
         )
-        with patch.object(sde_cache.os, "replace"):
-            result = await sde_cache._download_zip()
+        result = await sde_cache._download_zip()
 
         assert result == str(tmp_path / "sde.zip")
+        assert (tmp_path / "sde.zip").read_bytes() == data
         sde_cache.asyncio.sleep.assert_awaited_once_with(1.0)
         assert session.get.call_count == 2
         for call in session.get.call_args_list:
-            assert call.kwargs["headers"] == {"Range": "bytes=5000-"}, "续传位置不应回退"
+            assert call.kwargs["headers"] == {"Range": f"bytes={cut}-"}, "续传位置不应回退"
 
     @pytest.mark.asyncio
     @patch("services.importers.sde_cache.aiohttp.ClientSession")
@@ -767,19 +790,19 @@ def test_sde_build_freshness_gate(tmp_path, monkeypatch):
 
 
 def test_sde_source_selection_and_static_data_layout(monkeypatch):
-    """默认 legacy（行为不变）；`EVE_SDE_SOURCE=static-data` opt-in 新扁平包；非法值回退并告警。"""
+    """曙光运行时默认 static-data；legacy 只作显式解析布局；非法值回退 static-data。"""
     from services.importers import sde_cache
 
     monkeypatch.delenv(sde_cache.SDE_SOURCE_ENV, raising=False)
-    assert sde_cache.sde_source() == sde_cache.SDE_SOURCE_LEGACY
+    assert sde_cache.sde_source() == sde_cache.SDE_SOURCE_STATIC_DATA
     legacy_files = sde_cache.yaml_files_for("legacy")
     static_files = sde_cache.yaml_files_for("static-data")
     assert "agents.yaml" in legacy_files and "researchAgents.yaml" in legacy_files
     assert "agents.yaml" not in static_files and "researchAgents.yaml" not in static_files
-    monkeypatch.setenv(sde_cache.SDE_SOURCE_ENV, "static-data")
-    assert sde_cache.sde_source() == "static-data"
+    monkeypatch.setenv(sde_cache.SDE_SOURCE_ENV, "legacy")
+    assert sde_cache.sde_source() == "legacy", "legacy 只在显式指定时用于布局解析"
     monkeypatch.setenv(sde_cache.SDE_SOURCE_ENV, "bogus")
-    assert sde_cache.sde_source() == "legacy"
+    assert sde_cache.sde_source() == "static-data"
 
     # 扁平包：根目录 types.yaml / npcStations.yaml / _sde.yaml；成员映射与布局识别
     import io
@@ -789,7 +812,7 @@ def test_sde_source_selection_and_static_data_layout(monkeypatch):
     with zipfile.ZipFile(buf, "w") as zf:
         zf.writestr("types.yaml", "1: {}\n")
         zf.writestr("npcStations.yaml", "1: {}\n")
-        zf.writestr("_sde.yaml", "sde:\n  buildNumber: 3607705\n")
+        zf.writestr("_sde.yaml", "sde:\n  server: infinity\n  buildNumber: 3607705\n  complete: true\n")
     buf.seek(0)
     with zipfile.ZipFile(buf) as zf:
         assert sde_cache._zip_layout_source(zf) == "static-data"

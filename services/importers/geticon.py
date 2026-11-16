@@ -14,13 +14,15 @@ from pathlib import Path
 
 import aiohttp
 
+from core.constants import IMAGE_TYPE_URL
 from core.logger import log
+from core.net_proxy import PROXY_MIDDLEWARES
 from core.paths import icon_cache_dir, reference_db_path
 
 # ── 配置 ──
 ICON_CACHE_DIR = Path(icon_cache_dir())
-ESI_IMAGE_BASE = "https://images.evetech.net/types"
-CONCURRENCY = 100  # 并发数（EVE Image Server 可承受）
+#: 网易图片服务器承载能力未知，并发比国际服保守
+CONCURRENCY = 20
 ICON_SIZE = 64  # 图标尺寸(px): 32, 64, 128, 256
 
 ICON_CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -141,7 +143,7 @@ async def download_icon_for_group(
         return False
 
     # 下载代表 type_id 的图标（100 并发 + 瞬态错误最多重试 3 次）
-    url = f"{ESI_IMAGE_BASE}/{representative}/icon?size={ICON_SIZE}"
+    url = IMAGE_TYPE_URL.format(type_id=representative, size=ICON_SIZE)
     for attempt in range(3):
         async with semaphore:
             try:
@@ -262,6 +264,7 @@ async def main(progress_cb=None):
         headers={"Accept": "image/png", "User-Agent": "EveDataCrawler/1.0"},
         timeout=aiohttp.ClientTimeout(total=30),
         connector=aiohttp.TCPConnector(limit=CONCURRENCY, limit_per_host=CONCURRENCY),
+        middlewares=PROXY_MIDDLEWARES,
     ) as session:
         await download_all(session, type_ids, progress_cb)
 

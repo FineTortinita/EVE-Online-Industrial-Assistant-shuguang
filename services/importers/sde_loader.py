@@ -367,7 +367,9 @@ def _station_rows(sta_raw) -> list[tuple]:
             rows.append(
                 (
                     station_id,
-                    "",  # 新源没有 stationName：空串 → upsert COALESCE 保留旧站名
+                    # 官方新源没有 stationName（空串 → upsert COALESCE 保留旧站名）；
+                    # 曙光快照由 ESI 导出时会带上中文站名
+                    str(item.get("stationName") or ""),
                     int(item["solarSystemID"]) if item.get("solarSystemID") else None,
                     int(item["operationID"]) if item.get("operationID") else None,
                     int(item["typeID"]) if item.get("typeID") else None,
@@ -522,6 +524,89 @@ async def _ensure_region_zh_column(db: aiosqlite.Connection) -> bool:
     return True
 
 
+def _flat_stargate_rows(zip_path: str) -> list[tuple[int, int, int]]:
+    """扁平快照 `mapStargates.yaml` → `[(stargate_id, solar_system_id, 目标星门 id)]`。
+
+    第三列沿用 `stargate.destination_system_id` 的**既有口径：存目标星门 id**（列名是历史遗留，
+    `services/logistics._load_gate_graph` 靠再 join 一次 stargate 拿目标星系）——这里不改口径，
+    否则跳数图整张断开。没有该成员 / 解析失败 → 空列表。
+    """
+    import zipfile
+
+    import yaml
+
+    loader = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+    try:
+        with zipfile.ZipFile(zip_path) as zf:
+            data = yaml.load(zf.read("mapStargates.yaml"), Loader=loader) or {}
+    except (OSError, KeyError, zipfile.BadZipFile, yaml.YAMLError) as e:
+        # 吞的是「快照没有 mapStargates.yaml（旧快照）/ 包缺失损坏」：星门表留空，跳数走兜底距离表
+        log.info("快照无可用 mapStargates.yaml，跳过星门入库: %s", e)
+        return []
+    rows: list[tuple[int, int, int]] = []
+    for raw_id, item in data.items() if isinstance(data, dict) else ():
+        if not isinstance(item, dict):
+            continue
+        raw_dest = item.get("destination")
+        dest: dict = raw_dest if isinstance(raw_dest, dict) else {}
+        system_id, dest_gate = item.get("solarSystemID"), dest.get("stargateID")
+        if str(raw_id).isdigit() and system_id is not None and dest_gate is not None:
+            rows.append((int(raw_id), int(system_id), int(dest_gate)))
+    return rows
+
+
+async def write_stargates(progress_cb: Callable[[int, str], None] | None = None) -> int:
+    """快照星门 → `stargate` 表（运输合同跳数的星门图来源），返回写入条数。
+
+    幂等：已有行就跳过（星门随版本几乎不变；换版本整库重建时表是空的）。
+    """
+    async with _ref_db() as db:
+        cur = await db.execute("SELECT COUNT(*) FROM stargate")
+        if (await cur.fetchone())[0]:
+            log.info("stargate 表已就绪，跳过")
+            return 0
+    rows = await asyncio.to_thread(_flat_stargate_rows, SDE_ZIP_PATH)
+    if not rows:
+        return 0
+    async with _ref_db() as db:
+        for i in range(0, len(rows), BATCH_SIZE):
+            await db.executemany(
+                "INSERT OR REPLACE INTO stargate (stargate_id, solar_system_id, destination_system_id) VALUES (?, ?, ?)",
+                rows[i : i + BATCH_SIZE],
+            )
+        await db.commit()
+    # 跳数图与跳数结果是进程级缓存：空表时建出的空图 / 「不可达」会一直用到重启 → 一起作废
+    import services.logistics as logistics
+
+    with logistics._CACHE_LOCK:
+        logistics._GATE_GRAPH = None
+        logistics._JUMP_CACHE.clear()
+    log.info("stargate 写入完成 (%d 条)", len(rows))
+    return len(rows)
+
+
+def _flat_region_rows(zip_path: str) -> list[tuple[int, str, str]]:
+    """扁平快照 `mapRegions.yaml` → `[(region_id, 英文名, 中文名)]`；没有该成员 / 解析失败 → 空列表。"""
+    import zipfile
+
+    import yaml
+
+    loader = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+    try:
+        with zipfile.ZipFile(zip_path) as zf:
+            data = yaml.load(zf.read("mapRegions.yaml"), Loader=loader) or {}
+    except (OSError, KeyError, zipfile.BadZipFile, yaml.YAMLError) as e:
+        # 吞的是「旧布局包没有 mapRegions.yaml / 包缺失损坏」：退回只补中文名的旧行为
+        log.info("快照无可用 mapRegions.yaml，跳过星域入库: %s", e)
+        return []
+    rows: list[tuple[int, str, str]] = []
+    for raw_id, item in data.items() if isinstance(data, dict) else ():
+        name = item.get("name") if isinstance(item, dict) else None
+        if isinstance(name, dict) and str(raw_id).isdigit():
+            rows.append((int(raw_id), str(name.get("en") or ""), str(name.get("zh") or "")))
+    return rows
+
+
 async def write_region_names(progress_cb: Callable[[int, str], None] | None = None) -> int:
     """补齐 `region.zh_name`（CCP 官方中文星域名），返回写入条数。
 
@@ -532,9 +617,18 @@ async def write_region_names(progress_cb: Callable[[int, str], None] | None = No
     113 个星域各一次请求，只在缺名字时才发；补齐后重跑是空操作。
     ESI 的 `GET /universe/regions/{id}/?language=zh` 是 CCP 官方译名的来源。
     """
+    seed = await asyncio.to_thread(_flat_region_rows, SDE_ZIP_PATH)
     async with _ref_db() as db:
         await db.execute("CREATE TABLE IF NOT EXISTS region (region_id INTEGER PRIMARY KEY, region_name TEXT)")
         await _ensure_region_zh_column(db)
+        if seed:
+            # 自 e7e6f59 起没有任何步骤再往 region 表插行（本函数只 UPDATE zh_name），
+            # 老库靠历史数据才有 113 行 —— 全新库（曙光首装）永远是空表，合同页星域选不了。
+            # 扁平快照的 mapRegions.yaml 自带中英文名：插入缺的行，已有行不覆盖。
+            await db.executemany(
+                "INSERT OR IGNORE INTO region (region_id, region_name, zh_name) VALUES (?, ?, ?)", seed
+            )
+            await db.commit()
         cur = await db.execute("SELECT region_id FROM region WHERE zh_name IS NULL OR zh_name = ''")
         missing = [int(r[0]) for r in await cur.fetchall()]
 
@@ -548,7 +642,9 @@ async def write_region_names(progress_cb: Callable[[int, str], None] | None = No
         for idx, region_id in enumerate(missing):
             if progress_cb is not None:
                 progress_cb(idx, f"星域中文名 {idx}/{len(missing)}")
-            data = await session.fetch(f"https://esi.evetech.net/latest/universe/regions/{region_id}/?language=zh")
+            from core.constants import esi_url
+
+            data = await session.fetch(esi_url(f"/universe/regions/{region_id}/", language="zh"))
             name = (data or {}).get("name")
             if not name:
                 continue
@@ -853,6 +949,7 @@ CORE_WRITERS = [
     ("write_stations", write_stations),
     ("write_research", write_research),
     ("write_universe", write_universe),
+    ("write_stargates", write_stargates),
     # 唯一走 ESI 的一个（其余都只读 SDE zip）—— 星域中文名不在 SDE 里。
     # 幂等：已补齐时是空操作，所以放在每次初始化里跑不心疼。
     ("write_region_names", write_region_names),

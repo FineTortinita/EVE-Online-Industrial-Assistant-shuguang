@@ -370,3 +370,11 @@ class TestPriceFallback:
 
     def test_empty_input(self, service):
         assert service.price_map_for([], 10000002, "sell") == {}
+
+
+def test_region_lookups_survive_missing_region_table(service):
+    """回归（2026-11-16 用户实测崩溃）：静态数据初始化失败时 reference.db 没有 region 表，
+    合同页 `refreshRegionLabel` → `region_name` 抛 `no such table: region` 变成未捕获异常弹窗。
+    缺表时应降级：显示名用 id、搜索无候选。"""
+    assert service.region_name(10000002) == "星域 10000002"
+    assert service.list_regions("伏尔戈") == []

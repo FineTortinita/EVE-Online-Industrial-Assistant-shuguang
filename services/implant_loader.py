@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 
 from core.container import get_container
+from core.logger import log
 from core.paths import REF_DB_PATH
 
 IMPLANT_CACHE: list[dict] = []
@@ -81,14 +83,20 @@ def load_implants() -> list[dict]:
     conn = get_container().db.direct_connect("ref")
     try:
         cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT i.type_id, i.en_name, i.zh_name, d.dogma_attrs
-            FROM item i
-            JOIN item_dogma d ON i.type_id = d.type_id
-            ORDER BY i.en_name
-            """
-        )
+        try:
+            cur.execute(
+                """
+                SELECT i.type_id, i.en_name, i.zh_name, d.dogma_attrs
+                FROM item i
+                JOIN item_dogma d ON i.type_id = d.type_id
+                ORDER BY i.en_name
+                """
+            )
+        except sqlite3.OperationalError:
+            # 吞的是「item / item_dogma 表还没建」（静态数据或植入体步骤未初始化）：
+            # 返回空清单且**不缓存**，初始化补齐后下次打开即可拿到；不能让人物设置打不开
+            log.warning("植入体数据表不存在（初始化未完成），增效体清单为空")
+            return []
         results = []
         for row in cur.fetchall():
             type_id, en_name, zh_name, dogma_json = row

@@ -291,3 +291,82 @@ class TestStationNameProtection:
         assert kept[0] == "旧站名不要被清空", "新源缺 stationName 时不得覆盖已有站名"
         assert kept[1:] == (30002780, 26, 1531, 1000002)
         assert unnamed[0] == "", "新站没有名字就留空，不伪造"
+
+
+@pytest.mark.asyncio
+async def test_stargates_feed_the_jump_graph(temp_db_path, tmp_path, monkeypatch):
+    """快照 mapStargates.yaml → stargate 表 → logistics 跳数图连通。
+
+    守的是列口径：`destination_system_id` 必须存**目标星门 id**（logistics 再 join 一次拿星系），
+    存成星系 id 图会整张断开、跳数全回退到兜底表。缺目标的脏条目跳过，不写半截行。
+    """
+    import zipfile
+
+    import services.logistics as lg
+    from services.importers import sde_loader
+
+    zip_path = tmp_path / "sde.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr(
+            "mapStargates.yaml",
+            "50000001: {solarSystemID: 30000142, destination: {stargateID: 50000002, solarSystemID: 30000144}}\n"
+            "50000002: {solarSystemID: 30000144, destination: {stargateID: 50000001, solarSystemID: 30000142}}\n"
+            "50000003: {solarSystemID: 30000144, destination: {}}\n",
+        )
+    with (
+        patch("services.importers.sde_loader.DATABASE_PATH", temp_db_path),
+        patch("services.importers.sde_loader.SDE_ZIP_PATH", str(zip_path)),
+    ):
+        await initialize_database()
+        conn = sqlite3.connect(temp_db_path)
+        conn.executemany(
+            "INSERT INTO solar_system (solar_system_id, solar_system_name, security) VALUES (?, ?, 0.9)",
+            [(30000142, "Jita"), (30000144, "Perimeter")],
+        )
+        conn.commit()
+        conn.close()
+        assert await sde_loader.write_stargates() == 2
+        assert await sde_loader.write_stargates() == 0, "已有星门时幂等跳过"
+
+    class _Db:
+        def connect(self, _alias):
+            from contextlib import closing
+
+            return closing(sqlite3.connect(temp_db_path))
+
+    monkeypatch.setattr(lg, "_default_db", lambda: _Db())
+    assert lg.compute_jumps(30000142, 30000144) == 1
+
+
+@pytest.mark.asyncio
+async def test_region_names_seeds_empty_table_from_snapshot(temp_db_path, tmp_path):
+    """回归（2026-11-16 曙光首装实测）：`write_region_names` 只 UPDATE 不 INSERT，全新库
+    region 表永远 0 行 → 合同页星域无候选。快照有 mapRegions.yaml 时要把缺的行补进来，
+    已有行（及其中文名）不覆盖，且全部有中文名时不发 ESI 请求。"""
+    import zipfile
+
+    from services.importers import sde_loader
+
+    zip_path = tmp_path / "sde.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr(
+            "mapRegions.yaml",
+            "10000002: {name: {en: The Forge, zh: 伏尔戈}}\n10000043: {name: {en: Domain, zh: 多美}}\n",
+        )
+    conn = sqlite3.connect(temp_db_path)
+    conn.execute("CREATE TABLE region (region_id INTEGER PRIMARY KEY, region_name TEXT, zh_name TEXT)")
+    conn.execute("INSERT INTO region VALUES (10000043, 'Domain', '已有中文名')")
+    conn.commit()
+    conn.close()
+
+    with (
+        patch("services.importers.sde_loader.DATABASE_PATH", temp_db_path),
+        patch("services.importers.sde_loader.SDE_ZIP_PATH", str(zip_path)),
+        patch("services.client.APIClient", side_effect=AssertionError("名字齐全时不该请求 ESI")),
+    ):
+        assert await sde_loader.write_region_names() == 0
+
+    conn = sqlite3.connect(temp_db_path)
+    rows = {r[0]: (r[1], r[2]) for r in conn.execute("SELECT * FROM region")}
+    conn.close()
+    assert rows == {10000002: ("The Forge", "伏尔戈"), 10000043: ("Domain", "已有中文名")}

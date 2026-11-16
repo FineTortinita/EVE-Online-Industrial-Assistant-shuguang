@@ -18,10 +18,20 @@ import aiohttp
 import yaml
 
 from core.logger import log
+from core.net_proxy import PROXY_MIDDLEWARES
 from core.paths import is_frozen, reference_db_path
 
 CACHE_DIR = os.path.join(os.path.dirname(reference_db_path()), "..", "data")
-SDE_ZIP_URL = "https://eve-static-data-export.s3-eu-west-1.amazonaws.com/tranquility/sde.zip"
+#: 曙光静态数据快照：由 `scripts/build_infinity_sde.py` 在开发机从本地客户端缓存 + 曙光 ESI
+#: 生成，作为 fork 仓库 Release 资产发布。**换快照必须同时改 build 与 sha256**，
+#: 下载后 sha 不符直接拒绝（防止误用国际服包或被篡改的包）。
+INFINITY_SDE_BUILD = 3684550  # = 客户端 start.ini build = 曙光 /status server_version（2026-11-16）
+#: 快照 r2（含星门），17.5 MB；资产 sde-3684550/infinity-sde-3684550.zip
+INFINITY_SDE_SHA256 = "964e577ee08ef9ff7d11b0c9a1005901db938d8363ee3383e252f89a7c994ae0"
+SDE_ZIP_URL = (
+    "https://github.com/FineTortinita/EVE-Online-Industrial-Assistant-shuguang/releases/download/"
+    f"sde-{INFINITY_SDE_BUILD}/infinity-sde-{INFINITY_SDE_BUILD}.zip"
+)
 SDE_ZIP_PATH = os.path.join(CACHE_DIR, "sde.zip")
 ZIP_PART_PATH = SDE_ZIP_PATH + ".part"  # 下载中断残留 = 断点，下次 Range 续传
 
@@ -31,11 +41,7 @@ ZIP_PART_PATH = SDE_ZIP_PATH + ".part"  # 下载中断残留 = 断点，下次 R
 MANIFEST_PATH = os.path.join(CACHE_DIR, "sde_cache_manifest.json")
 MANIFEST_VERSION = 1
 
-#: 官方 SDE 发布源的 build 号指针（02-03 A 段）。旧 S3 `sde.zip` 自 2025-07-07 起
-#: 被冻结；这个 JSONL 每次启动只请求一次（~100B），用来判断本地缓存是否过期。
-#: 真正迁移到新发布源（扁平 102 文件包，`fsd/`/`bsd/`/`universe/` 已消失）属 B 段，
-#: 需要逐导入器适配，本轮只做**新鲜度检测与告警**，不做静默重下。
-SDE_LATEST_URL = "https://developers.eveonline.com/static-data/tranquility/latest.jsonl"
+#: 新鲜度：与曙光 ESI `/status/` 的 server_version 比对（曙光没有官方 latest.jsonl）。
 
 #: 最近一次新鲜度检查结果（供 UI/诊断读取；`get_sde_freshness()`）。
 _FRESHNESS: dict[str, object] = {}
@@ -81,19 +87,18 @@ ZIP_LOOKUP = {
 # 本模块只负责「下载缓存 + 布局/字段映射 + 源感知 manifest」；各导入器按映射表适配
 # （station 名保护见 sde_loader.write_stations）。
 
-#: 源选择环境变量：`legacy`（默认，旧 S3 冻结包）| `static-data`（官方新扁平包，opt-in）。
+#: 源选择环境变量。曙光分支**只用扁平布局**（快照按 static-data 布局生成），
+#: legacy 仅保留给解析单测；非法/缺省一律 static-data。
 SDE_SOURCE_ENV = "EVE_SDE_SOURCE"
 SDE_SOURCE_LEGACY = "legacy"
 SDE_SOURCE_STATIC_DATA = "static-data"
 SDE_SELECTABLE_SOURCES = (SDE_SOURCE_LEGACY, SDE_SOURCE_STATIC_DATA)
 
-#: 显式覆盖 zip URL（测试/内网/固定版本验证用；不改变默认行为）。
+#: 显式覆盖 zip URL（本地刚构建的快照、测试用）。覆盖时不做 sha 校验（开发路径）。
 SDE_ZIP_URL_ENV = "EVE_SDE_ZIP_URL"
 
-#: 新源 URL 模板：build 号来自 `latest.jsonl`（`SDE_LATEST_URL`）。
-SDE_STATIC_DATA_ZIP_TEMPLATE = (
-    "https://developers.eveonline.com/static-data/tranquility/eve-online-static-data-{build}-yaml.zip"
-)
+#: 快照 manifest 里必须是这个服务器名，否则拒绝（防国际服 / 晨曦包误入）。
+SDE_SERVER = "infinity"
 
 #: 新源（扁平布局）里「缓存文件名 → zip 成员名」。新源没有 agents/researchAgents，
 #: 且 station 数据改名 + 缺字段（stationName 没了）——导入器侧按本表 + 字段映射适配。
@@ -123,12 +128,9 @@ _LAST_RESOLVED_BUILD: int | None = None
 def sde_source() -> str:
     """当前 SDE 发布源（`EVE_SDE_SOURCE`，非法值回退 legacy 并告警）。"""
     raw = (os.environ.get(SDE_SOURCE_ENV) or "").strip().lower()
-    if not raw:
+    if raw == SDE_SOURCE_LEGACY:
         return SDE_SOURCE_LEGACY
-    if raw not in SDE_SELECTABLE_SOURCES:
-        log.warning("未知 %s=%r，回退 legacy（可选: %s）", SDE_SOURCE_ENV, raw, ", ".join(SDE_SELECTABLE_SOURCES))
-        return SDE_SOURCE_LEGACY
-    return raw
+    return SDE_SOURCE_STATIC_DATA
 
 
 def yaml_files_for(source: str | None = None) -> set[str]:
@@ -163,42 +165,60 @@ def _zip_layout_source(zf: zipfile.ZipFile) -> str:
 
 
 def _resolve_sde_zip_url_sync() -> tuple[str, int | None]:
-    """同步解析当前源应下载的 zip URL（+ 新源的 build 号）。
-
-    - 测试/内网：`EVE_SDE_ZIP_URL` 显式覆盖（返回 build=None，由 zip 自身 `_sde.yaml` 兜底）。
-    - legacy：常量 `SDE_ZIP_URL`。
-    - static-data：请求 `latest.jsonl` 拿 build 再拼模板 URL；失败则抛错（opt-in 源不静默降级，
-      否则会拿旧包当新源数据）。
-    """
+    """应下载的曙光快照 URL（+ build）。`EVE_SDE_ZIP_URL` 可覆盖（file:// 或 http(s)）。"""
     override = (os.environ.get(SDE_ZIP_URL_ENV) or "").strip()
     if override:
         return override, None
-    if sde_source() == SDE_SOURCE_LEGACY:
-        return SDE_ZIP_URL, None
-    import urllib.request
-
-    try:
-        with urllib.request.urlopen(SDE_LATEST_URL, timeout=15) as resp:  # 固定官方 HTTPS 常量
-            raw = resp.read().decode("utf-8")
-    except OSError as e:
+    if not INFINITY_SDE_BUILD or not INFINITY_SDE_SHA256:
         raise RuntimeError(
-            f"新 SDE 源需要先拿到官方 build 号，但请求 {SDE_LATEST_URL} 失败：{e}。"
-            f"离线/内网可设 {SDE_ZIP_URL_ENV} 指向已下载的 yaml zip。"
-        ) from e
-    build: int | None = None
-    for line in raw.splitlines():
-        try:
-            data = json.loads(line)
-        except ValueError:
-            continue
-        if isinstance(data, dict) and data.get("_key") == "sde" and data.get("buildNumber") is not None:
-            build = int(data["buildNumber"])
-            break
-    if build is None:
-        raise RuntimeError(f"官方 {SDE_LATEST_URL} 里找不到 sde.buildNumber")
+            "本版本尚未内置曙光静态数据快照（INFINITY_SDE_BUILD/SHA256 未填）。"
+            f"开发时可用 scripts/build_infinity_sde.py 生成后，设 {SDE_ZIP_URL_ENV} 指向该 zip。"
+        )
     global _LAST_RESOLVED_BUILD
-    _LAST_RESOLVED_BUILD = build
-    return SDE_STATIC_DATA_ZIP_TEMPLATE.format(build=build), build
+    _LAST_RESOLVED_BUILD = INFINITY_SDE_BUILD
+    return SDE_ZIP_URL, INFINITY_SDE_BUILD
+
+
+def verify_snapshot(zip_path: str, *, expected_sha256: str | None) -> None:
+    """快照完整性与归属校验：sha256（给了才比）+ `_sde.yaml` 的 server 必须是 infinity。
+
+    不通过抛 RuntimeError，由调用方删包并报错 —— 绝不拿来源不明的包初始化。
+    """
+    import hashlib
+
+    if expected_sha256:
+        h = hashlib.sha256()
+        with open(zip_path, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                h.update(chunk)
+        if h.hexdigest() != expected_sha256.lower():
+            raise RuntimeError(f"曙光数据快照校验失败（sha256 不符），已拒绝：{zip_path}")
+    try:
+        with zipfile.ZipFile(zip_path) as zf:
+            meta = yaml.safe_load(zf.read("_sde.yaml")) or {}
+    except (KeyError, zipfile.BadZipFile, yaml.YAMLError) as e:
+        raise RuntimeError(f"数据快照缺少或无法解析 _sde.yaml：{e}") from e
+    info = meta.get("sde") if isinstance(meta, dict) else None
+    info = info if isinstance(info, dict) else {}
+    server = info.get("server")
+    if server != SDE_SERVER:
+        raise RuntimeError(f"数据快照不是曙光服的（server={server or '未标注'}），已拒绝")
+    build = info.get("buildNumber")
+    if not isinstance(build, int) or isinstance(build, bool) or build <= 0:
+        raise RuntimeError("数据快照缺少有效 buildNumber，已拒绝")
+    if info.get("complete") is not True:
+        raise RuntimeError("数据快照不完整（complete 必须为 true），蓝图提取素材不能用于初始化")
+    required = set(STATIC_DATA_ZIP_NAMES.values()) | {
+        "blueprints.yaml",
+        "mapRegions.yaml",
+        "mapConstellations.yaml",
+        "mapSolarSystems.yaml",
+        "mapStargates.yaml",
+    }
+    with zipfile.ZipFile(zip_path) as zf:
+        missing = required - set(zf.namelist())
+    if missing:
+        raise RuntimeError(f"数据快照缺少必需文件：{', '.join(sorted(missing))}")
 
 
 # Universe 数据 JSON 缓存路径（避免每次从 ZIP 解析 50K+ YAML 文件）
@@ -239,6 +259,9 @@ def _all_cached() -> bool:
         return False  # 本版/本源要求的 YAML 集合变了（新增/删除/换源）→ 重新提取
     # 旧 manifest（A 段之前）没记 source：只对 legacy 兼容；static-data 必须重新提取。
     if manifest.get("source") not in (None, source):
+        return False
+    # 曙光分支：缓存必须标明来自曙光快照（旧国际服缓存没有该键 → 重新提取）
+    if manifest.get("server") != SDE_SERVER:
         return False
     for fname in yaml_files_for(source):
         path = cache_path(fname)
@@ -313,7 +336,13 @@ def _write_manifest(build: int | None = None, source: str | None = None) -> None
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(
-                {"version": MANIFEST_VERSION, "files": sorted(yaml_files_for(src)), "build": build, "source": src},
+                {
+                    "version": MANIFEST_VERSION,
+                    "files": sorted(yaml_files_for(src)),
+                    "build": build,
+                    "source": src,
+                    "server": SDE_SERVER,
+                },
                 f,
             )
         os.replace(tmp, MANIFEST_PATH)
@@ -333,6 +362,10 @@ def _backfill_manifest_from_zip() -> bool:
     已知残留漏洞：zip 已被清理时无法校验 → 返回 False，交回正常下载/提取路径。
     """
     if not os.path.exists(SDE_ZIP_PATH):
+        return False
+    try:
+        verify_snapshot(SDE_ZIP_PATH, expected_sha256=None)  # 本地旧包不是曙光快照 → 不补标记
+    except RuntimeError:
         return False
     build = None
     try:
@@ -372,12 +405,14 @@ def _universe_cache_has_names(systems: list) -> bool:
 
 
 def _validate_and_finalize() -> None:
-    """校验 zip 完整性并原子 rename；损坏则删 .part 抛错（下次从头下载）。"""
+    """校验 zip 完整性 + 曙光归属并原子 rename；不通过则删 .part 抛错（下次从头下载）。"""
+    overridden = bool((os.environ.get(SDE_ZIP_URL_ENV) or "").strip())
     try:
         with zipfile.ZipFile(ZIP_PART_PATH) as zf:
             if zf.testzip() is not None:
                 raise zipfile.BadZipFile("corrupted member")
-    except (zipfile.BadZipFile, zipfile.LargeZipFile):
+        verify_snapshot(ZIP_PART_PATH, expected_sha256=None if overridden else INFINITY_SDE_SHA256)
+    except (zipfile.BadZipFile, zipfile.LargeZipFile, RuntimeError):
         os.remove(ZIP_PART_PATH)
         raise
     os.replace(ZIP_PART_PATH, SDE_ZIP_PATH)
@@ -399,11 +434,19 @@ async def _download_zip(progress_cb: Callable[[int, str], None] | None = None, u
     `url` 省略时按当前源解析（见 `_resolve_sde_zip_url_sync`）。
     """
     download_url = url or _resolve_sde_zip_url_sync()[0]
+    if download_url.startswith("file://"):
+        # 本地快照（开发机刚构建的包）：直接复制，不走 HTTP
+        import shutil
+        from urllib.request import url2pathname
+
+        shutil.copyfile(url2pathname(download_url.removeprefix("file:")), ZIP_PART_PATH)
+        _validate_and_finalize()
+        return SDE_ZIP_PATH
     timeout = aiohttp.ClientTimeout(total=None, sock_connect=30, sock_read=120)
     for attempt in range(_DL_MAX_RETRIES + 1):
         offset = os.path.getsize(ZIP_PART_PATH) if os.path.exists(ZIP_PART_PATH) else 0
         headers = {"Range": f"bytes={offset}-"} if offset else {}
-        async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with aiohttp.ClientSession(timeout=timeout, middlewares=PROXY_MIDDLEWARES) as session:
             async with session.get(download_url, headers=headers) as resp:
                 if resp.status in (429, 503):
                     if attempt >= _DL_MAX_RETRIES:
@@ -465,8 +508,12 @@ def _cached_zip_matches_source() -> bool:
         return False
     try:
         with zipfile.ZipFile(SDE_ZIP_PATH) as zf:
-            return _zip_layout_source(zf) == sde_source()
-    except (zipfile.BadZipFile, OSError):
+            if _zip_layout_source(zf) != sde_source():
+                return False
+        overridden = bool((os.environ.get(SDE_ZIP_URL_ENV) or "").strip())
+        verify_snapshot(SDE_ZIP_PATH, expected_sha256=None if overridden else INFINITY_SDE_SHA256)
+        return True
+    except (zipfile.BadZipFile, OSError, RuntimeError):
         return False
 
 
@@ -485,7 +532,7 @@ def _sync_ensure_zip(progress_cb: Callable[[int, str], None] | None = None) -> s
     with _zip_dl_lock:
         # 只有 opt-in 的新源才做「布局核对 + 换源清理」；legacy 默认路径保持原行为
         # （不多碰文件系统：既有测试按调用次数桩了 os.path.exists）。
-        if sde_source() == SDE_SOURCE_STATIC_DATA and not _cached_zip_matches_source():
+        if os.path.exists(SDE_ZIP_PATH) and not _cached_zip_matches_source():
             _drop_stale_zip()
         if os.path.exists(SDE_ZIP_PATH):
             return SDE_ZIP_PATH
@@ -621,7 +668,7 @@ async def ensure_sde_cache(progress_cb: Callable[[int, str], None] | None = None
 
     if _all_cached():
         sizes = ", ".join(
-            f"{fname}={os.path.getsize(cache_path(fname)) / 1024 / 1024:.1f}MB" for fname in sorted(YAML_FILES)
+            f"{fname}={os.path.getsize(cache_path(fname)) / 1024 / 1024:.1f}MB" for fname in sorted(yaml_files_for())
         )
         log.info(f"SDE YAML 缓存已就绪 ({sizes})")
         return
@@ -631,29 +678,25 @@ async def ensure_sde_cache(progress_cb: Callable[[int, str], None] | None = None
 
 
 async def fetch_latest_sde_build(timeout: int = 10) -> int | None:
-    """官方 `latest.jsonl` 的当前 build 号（1 次小请求）。失败/离线 → None。"""
+    """曙光服当前版本号（ESI `/status/` 的 server_version）。失败/离线 → None。"""
+    from core.constants import esi_url
+
     try:
         async with aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=timeout),
             headers={"Accept": "application/json", "User-Agent": "EveApp/1.0"},
+            middlewares=PROXY_MIDDLEWARES,
         ) as session:
-            async with session.get(SDE_LATEST_URL) as resp:
+            async with session.get(esi_url("/status/")) as resp:
                 if resp.status != 200:
                     return None
-                text = await resp.text()
-    except (TimeoutError, aiohttp.ClientError, OSError):
+                data = await resp.json()
+    except (TimeoutError, aiohttp.ClientError, OSError, ValueError):
         return None
-    for line in text.splitlines():
-        try:
-            data = json.loads(line)
-        except ValueError:
-            continue
-        if isinstance(data, dict) and data.get("_key") == "sde":
-            try:
-                return int(data["buildNumber"])
-            except (KeyError, TypeError, ValueError):
-                return None
-    return None
+    try:
+        return int(data["server_version"])
+    except (KeyError, TypeError, ValueError):
+        return None
 
 
 async def warn_if_sde_stale() -> dict:
@@ -672,9 +715,8 @@ async def warn_if_sde_stale() -> dict:
     _FRESHNESS = {"local_build": local, "remote_build": remote, "stale": stale, "source": sde_source()}
     if stale:
         log.warning(
-            "SDE 静态数据已过期：本地 build=%s / 官方 build=%s。"
-            "本轮只告警不自动重导（新发布源布局适配见 02-03 B 段）；"
-            "新物品/新蓝图在适配完成前不会出现在应用里。",
+            "曙光静态数据可能已过期：本地快照 build=%s / 服务器版本=%s。"
+            "不自动重导；新物品/新蓝图要等新版本的数据快照发布。",
             local,
             remote,
         )

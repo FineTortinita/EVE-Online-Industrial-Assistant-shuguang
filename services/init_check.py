@@ -9,9 +9,11 @@ from contextlib import closing
 from core.logger import log
 from core.paths import BP_DB_PATH, MKT_DB_PATH, REF_DB_PATH, USR_DB_PATH
 
-# item 表「已填名称」达到该数量即视为完整（typeIDs.yaml 全集约 4~5 万条）。
-# 初始化检测(getitems 跳过判定)共用此阈值，避免 1万~5万区间重复拉取。
-ITEMS_NAMED_READY = 50000
+# item 表「已填名称」达到该数量即视为完整。初始化检测(getitems 跳过判定)共用此阈值。
+# 曙光快照只收「已发布 + 蓝图引用」物品：build 3684550 实测 34,879 条（国际服 SDE 全集约 5 万，
+# 含大量未发布 ID）。旧阈值 50000 会让曙光库永远判「未就绪」、每次启动重导 —— 取 30000：
+# 仍远高于任何半截导入的行数，又给曙光版本间的物品增减留余量。
+ITEMS_NAMED_READY = 30000
 
 
 def check_items() -> int:

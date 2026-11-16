@@ -424,10 +424,16 @@ def list_regions(query: str = "", limit: int = 30) -> list[dict]:
                 (keyword, keyword, limit),
             ).fetchall()
         except sqlite3.OperationalError:
-            rows = conn.execute(
-                "SELECT region_id, region_name, NULL FROM region WHERE region_name LIKE ? ORDER BY region_name LIMIT ?",
-                (keyword, limit),
-            ).fetchall()
+            # 吞的是「缺 zh_name 列」；region 表本身不存在（静态数据未初始化）时回退也会报 → 无候选
+            try:
+                rows = conn.execute(
+                    "SELECT region_id, region_name, NULL FROM region WHERE region_name LIKE ? "
+                    "ORDER BY region_name LIMIT ?",
+                    (keyword, limit),
+                ).fetchall()
+            except sqlite3.OperationalError:
+                log.warning("region 表不存在（静态数据未初始化），星域搜索无候选")
+                rows = []
     return [{"region_id": int(r[0]), "en_name": r[1] or "", "name": r[2] or r[1] or str(r[0])} for r in rows]
 
 
@@ -442,9 +448,12 @@ def region_name(region_id: int) -> str:
         try:
             row = conn.execute("SELECT region_name, zh_name FROM region WHERE region_id = ?", (region_id,)).fetchone()
         except sqlite3.OperationalError:
-            pass
-        if row is None:
-            row = conn.execute("SELECT region_name FROM region WHERE region_id = ?", (region_id,)).fetchone()
+            # 吞的是「缺 zh_name 列」；连 region 表都没有（初始化没跑成）时下面的回退也会报，
+            # 那时只能显示 id —— 合同页的标签刷新不该因此让整个程序弹崩溃框
+            try:
+                row = conn.execute("SELECT region_name FROM region WHERE region_id = ?", (region_id,)).fetchone()
+            except sqlite3.OperationalError:
+                log.warning("region 表不存在（静态数据未初始化），星域名按 id 显示")
     if not row:
         return f"星域 {region_id}"
     # 主查询给 (region_name, zh_name) —— 中文优先；回退查询只有 (region_name,)。
