@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 
 import aiosqlite
 
+from core.constants import esi_url
 from core.logger import log
 from core.paths import reference_db_path, user_db_path
 from services.client import APIClient
@@ -16,7 +17,6 @@ from services.db_locks import get_db_write_lock
 
 REF_DB_PATH = reference_db_path()
 USR_DB_PATH = user_db_path()
-ESI_BASE = "https://esi.evetech.net/latest"
 
 
 @asynccontextmanager
@@ -118,7 +118,7 @@ async def run_industry_update(progress_cb=None):
 
         # ── 系统成本指数 (reference.db) ──
         log.info("获取工业系统成本指数...")
-        systems = await client.fetch_required(f"{ESI_BASE}/industry/systems/")
+        systems = await client.fetch_required(esi_url("/industry/systems/"))
         log.info(f"  {len(systems)} 个星系")
         if progress_cb:
             progress_cb(25, f"获取系统成本指数 ({len(systems)} 个星系)")
@@ -142,7 +142,7 @@ async def run_industry_update(progress_cb=None):
 
         # ── 工业设施 (reference.db) ──
         log.info("获取工业设施数据...")
-        facilities = await client.fetch_required(f"{ESI_BASE}/industry/facilities/")
+        facilities = await client.fetch_required(esi_url("/industry/facilities/"))
         log.info(f"  {len(facilities)} 个设施")
         if progress_cb:
             progress_cb(65, f"获取工业设施数据 ({len(facilities)} 个设施)")

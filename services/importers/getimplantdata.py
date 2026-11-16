@@ -18,6 +18,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+from core.constants import esi_url
 from core.logger import log
 from core.paths import reference_db_path
 from services.db_locks import get_db_write_lock
@@ -74,7 +75,7 @@ async def fetch_type_dogma(client, type_id: int) -> dict | None:
     Returns:
         {"type_id": int, "dogma_attrs": json_str, "dogma_effects": json_str} | None
     """
-    url = f"https://esi.evetech.net/latest/universe/types/{type_id}/?datasource=tranquility"
+    url = esi_url(f"/universe/types/{type_id}/")
     data = await client.fetch(url)
     if data is None:
         return None
@@ -95,7 +96,7 @@ async def fetch_attribute_name(client, attribute_id: int) -> tuple[int, str]:
     Returns:
         (attribute_id, name) | (attribute_id, "unknown")
     """
-    url = f"https://esi.evetech.net/latest/dogma/attributes/{attribute_id}/?datasource=tranquility"
+    url = esi_url(f"/dogma/attributes/{attribute_id}/")
     data = await client.fetch(url)
     if data is None:
         return (attribute_id, "unknown")

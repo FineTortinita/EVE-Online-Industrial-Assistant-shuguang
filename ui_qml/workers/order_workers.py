@@ -15,12 +15,11 @@ from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import QThread, Signal
 
+from core.constants import esi_url
 from core.logger import log
 
 if TYPE_CHECKING:
     from services.client import APIClient
-
-ESI_BASE_URL = "https://esi.evetech.net/latest"
 
 #: location_id → 显示名。**只放解析成功的条目**：查不到就不写，下次开窗还能重试。
 #: 见 `OrderFetchWorker._resolve_names` 里对「失败也写缓存」为什么是错的说明。
@@ -161,7 +160,7 @@ class OrderFetchWorker(QThread):
         - `404` ⇒ 该市场没有此 type 的订单（合法空）；
         - `200` ⇒ `X-Pages` 大于 1 时继续翻页（PLEX 全域单 type 实测 2 页）。
         """
-        base = f"{url}?type_id={self._type_id}&order_type={order_type}"
+        base = f"{url}&type_id={self._type_id}&order_type={order_type}"  # url 已含 datasource 查询串
         status, first, headers = await client.fetch_state(f"{base}&page=1")
         if status is None:
             return None, []
@@ -183,7 +182,7 @@ class OrderFetchWorker(QThread):
         if self.isInterruptionRequested():
             return [], []
 
-        url = f"{ESI_BASE_URL}/markets/{self._region_id}/orders/"
+        url = esi_url(f"/markets/{self._region_id}/orders/")
         # 买 / 卖**并发**取：两个 order_type 互不依赖（各自一次 GET）。
         # 串行 vs 并发在**共享 session**（本模块的常驻循环路径）下实测，每次都取「买+卖」：
         #   串行：第 1 次 905~1197ms，稳态(第 2..4 次) 440~488ms
@@ -264,7 +263,7 @@ class OrderFetchWorker(QThread):
            而 `_resolve_names` 开头的 `lid not in _station_name_cache` 过滤之后
            永远跳过它 —— 实测表现就是站名列**永远**是编号，重启前好不了。
         """
-        url = f"{ESI_BASE_URL}/universe/names/"
+        url = esi_url("/universe/names/")
         for start in range(0, len(ids), 1000):
             if self.isInterruptionRequested():
                 return

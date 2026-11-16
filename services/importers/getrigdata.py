@@ -22,6 +22,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+from core.constants import esi_url
 from core.logger import log
 from core.paths import reference_db_path
 from services.db_locks import get_db_write_lock
@@ -144,7 +145,7 @@ async def fetch_rig_bonuses(client, type_id: int) -> dict | None:
         类型里没有某属性（非对应效果的改件）时该值为 0.0 —— 这是「确实没有加成」，
         与旧库补列后的 NULL（「还没拉取过」）含义不同。
     """
-    url = f"https://esi.evetech.net/latest/universe/types/{type_id}/?datasource=tranquility"
+    url = esi_url(f"/universe/types/{type_id}/")
     data = await client.fetch(url)
     if data is None:
         return None

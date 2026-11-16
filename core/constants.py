@@ -1,14 +1,40 @@
 """
-全局常量 — 贸易中心 ID 等
+全局常量 — 服务器端点、贸易中心 ID 等
 """
 
-# 四大贸易中心 region_id
+from urllib.parse import urlencode
+
+# ── 曙光服（Infinity）端点：全仓唯一来源 ──
+# 网易 ESI 主机同时服务晨曦（serenity）与曙光（infinity），**必须**显式带 datasource，
+# 不能依赖服务端默认值。实测见 docs/dev/decisions.md「曙光分支」。
+ESI_HOST = "https://ali-esi.evepc.163.com"
+ESI_BASE = f"{ESI_HOST}/latest"
+ESI_DATASOURCE = "infinity"
+SSO_HOST = "https://login-infinity.evepc.163.com"
+SSO_AUTHORIZE_URL = f"{SSO_HOST}/v2/oauth/authorize"
+SSO_TOKEN_URL = SSO_HOST + "/v2/oauth/" + "token"
+SSO_ISSUER = "login-infinity.evepc.163.com"
+SSO_VERIFY_URL = f"{ESI_HOST}/verify"
+IMAGE_TYPE_URL = "https://image.evepc.163.com/Type/{type_id}_{size}.png"
+
+
+def esi_url(path: str, **params: object) -> str:
+    """拼曙光 ESI URL：总是附带 datasource=infinity；值为 None 的参数丢弃。
+
+    path 以 `/` 开头、相对 `/latest`，例如 `esi_url("/markets/10000002/orders/", type_id=34)`。
+    """
+    query = {"datasource": ESI_DATASOURCE, **{k: v for k, v in params.items() if v is not None and k != "datasource"}}
+    return f"{ESI_BASE}{path}?{urlencode(query)}"
+
+
+# 五大贸易中心 region_id
 TRADE_HUB_IDS = {
     "Jita": 10000002,
     "Amarr": 10000043,
     "Dodixie": 10000032,
     "Rens": 10000030,
-    "Hek": 10000028,
+    #: Hek 星系 30002053 属 Metropolis（10000042）；旧值 10000028 是 Molden Heath（两服实测一致）
+    "Hek": 10000042,
 }
 HUB_NAMES = {v: k for k, v in TRADE_HUB_IDS.items()}
 TRADE_HUBS = list(TRADE_HUB_IDS.keys())  # ["Jita", "Amarr", "Dodixie", "Rens"]

@@ -263,15 +263,16 @@ class InitService(QObject):
         赶上网速波动或事件循环短暂被同步大循环阻塞就会误判，连累整批网络步骤
         报"网络不可用"。重试 3 次、超时放宽到 15s、指数退避。
         """
+        from core.constants import esi_url
         from services.client import APIClient
 
         last_err: str | None = None
         for attempt in range(3):
             try:
                 async with APIClient(timeout=15) as client:
-                    data = await client.fetch("https://esi.evetech.net/status/")
+                    data = await client.fetch(esi_url("/status/"))
                 if data is not None:
-                    msg = "ESI 连接正常"
+                    msg = "曙光 ESI 连接正常"
                     self._emit_network(True, msg)
                     return True
                 last_err = "ESI 状态接口未返回 200"

@@ -1,7 +1,7 @@
 """Single-instance lock using PID file.
 
-默认锁文件为 `~/.eve-assistant/instance.lock`(Main.py 使用)。可传入自定义
-`lock_file` 加独立锁,例如 dev.py 用 `~/.eve-assistant/dev.lock`——启动器与
+默认锁文件为 `~/.eve-assistant-shuguang/instance.lock`(Main.py 使用)。可传入自定义
+`lock_file` 加独立锁,例如 dev.py 用 `~/.eve-assistant-shuguang/dev.lock`——启动器与
 应用实例的锁必须分离,二者才能共存。
 """
 
@@ -12,7 +12,7 @@ from pathlib import Path
 
 from core.logger import log
 
-_LOCK_FILE = Path.home() / ".eve-assistant" / "instance.lock"
+_LOCK_FILE = Path.home() / ".eve-assistant-shuguang" / "instance.lock"
 
 # 本进程持有的命名互斥体句柄（lock 名 → HANDLE）。进程退出时 OS 自动回收，
 # 崩溃也无需清理残留——比文件锁更健壮。

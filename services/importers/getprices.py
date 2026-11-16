@@ -15,7 +15,7 @@ from datetime import UTC, datetime, timedelta
 
 import aiosqlite
 
-from core.constants import TRADE_HUB_IDS
+from core.constants import TRADE_HUB_IDS, esi_url
 from core.container import get_container
 from core.logger import log
 from core.paths import market_db_path, progress_file
@@ -30,7 +30,6 @@ from services.price_history import (
 )
 
 DATABASE_PATH = market_db_path()
-ESI_BASE_URL = "https://esi.evetech.net/latest"
 
 TRADE_REGIONS = list(TRADE_HUB_IDS.items())
 
@@ -165,7 +164,7 @@ async def fetch_baseline_prices() -> dict[int, dict]:
     真实卖价仍由区域订单簿覆盖；PLEX 由 `fetch_plex_global_book` 用全域盘口覆盖。
     """
     async with APIClient(timeout=60) as client:
-        data = await client.fetch_raw(f"{ESI_BASE_URL}/markets/prices/")
+        data = await client.fetch_raw(esi_url("/markets/prices/"))
     if data is None:
         log.warning("基准价格拉取失败（网络/限流），本次价格更新将缺少兜底数据")
         return {}
@@ -194,7 +193,7 @@ async def fetch_plex_global_book() -> dict[int, dict]:
         `{44992: {buy_price, sell_price, buy_volume, sell_volume}}`；
         任一页失败/空盘口 → 返回 `{}`（宁可不覆盖，也不写残缺值）。
     """
-    base = f"{ESI_BASE_URL}/markets/{PLEX_REGION_ID}/orders/?order_type=all"
+    base = esi_url(f"/markets/{PLEX_REGION_ID}/orders/", order_type="all")
     async with APIClient(timeout=120) as client:
         headers = await client.get_headers(f"{base}&page=1")
         if headers is None:
@@ -244,7 +243,7 @@ async def _fetch_order_pages_detailed(
 
     async def get_page(p: int):
         nonlocal failed
-        url = f"{ESI_BASE_URL}/markets/{region_id}/orders/?order_type={order_type}&page={p}"
+        url = esi_url(f"/markets/{region_id}/orders/", order_type=order_type, page=p)
         async with sem:
             try:
                 data = await client.fetch_raw(url)
@@ -286,7 +285,7 @@ async def discover_pages(client: APIClient, targets: list[tuple[str, int]] | Non
         if cache_key in _PAGE_CACHE and (cached_ts is None or time.time() - cached_ts < _PAGE_CACHE_TTL_SECONDS):
             keys[cache_key] = _PAGE_CACHE[cache_key]
             return
-        url = f"{ESI_BASE_URL}/markets/{rid}/orders/?order_type={ot}&page=1"
+        url = esi_url(f"/markets/{rid}/orders/", order_type=ot, page=1)
         headers = await client.get_headers(url)
         if headers is None:
             log.warning("页数发现失败（非 200/限流）: %s", url)

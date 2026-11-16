@@ -8,6 +8,7 @@ import pytest
 from services.importers.getcontracts import (
     CONTRACT_TYPE_MAP,
     TRADE_REGIONS,
+    _fetch_contract_pages_detailed,
     _fetch_issuer_names_async,
     fetch_contract_items,
     fetch_contract_pages,
@@ -57,8 +58,7 @@ class TestFetchContractPages:
     async def test_single_page(self):
         """单页合同列表应返回正确的数据"""
         session = MagicMock()
-        session.get_headers = AsyncMock(return_value={"X-Pages": "1"})
-        session.fetch_raw = AsyncMock(return_value=[MOCK_CONTRACT])
+        session.fetch_state = AsyncMock(return_value=(200, [MOCK_CONTRACT], {"X-Pages": "1"}))
 
         contracts = await fetch_contract_pages(session, 10000002)
         assert len(contracts) == 1
@@ -69,7 +69,7 @@ class TestFetchContractPages:
     async def test_http_error_returns_empty(self):
         """HTTP 非 200 响应返回空列表"""
         session = MagicMock()
-        session.get_headers = AsyncMock(return_value=None)
+        session.fetch_state = AsyncMock(return_value=(None, None, {}))
 
         contracts = await fetch_contract_pages(session, 10000002)
         assert contracts == []
@@ -78,8 +78,8 @@ class TestFetchContractPages:
     async def test_multi_page(self):
         """多页合同能拉取所有页面"""
         session = MagicMock()
-        session.get_headers = AsyncMock(return_value={"X-Pages": "2"})
-        session.fetch_raw = AsyncMock(side_effect=[[MOCK_CONTRACT], [{**MOCK_CONTRACT, "contract_id": 100002}]])
+        session.fetch_state = AsyncMock(return_value=(200, [MOCK_CONTRACT], {"X-Pages": "2"}))
+        session.fetch_raw = AsyncMock(return_value=[{**MOCK_CONTRACT, "contract_id": 100002}])
 
         contracts = await fetch_contract_pages(session, 10000002)
         assert len(contracts) == 2
@@ -165,16 +165,22 @@ class TestSaveContractList:
         conn.close()
 
     @pytest.mark.asyncio
-    async def test_incomplete_fetch_keeps_old_rows(self, tmp_path):
-        """拉取不完整的星域必须保留旧数据，不能把整区清空。"""
+    @pytest.mark.parametrize("first_page", [(None, None, {}), (404, None, {}), (200, [], {})])
+    async def test_incomplete_fetch_keeps_old_rows(self, tmp_path, first_page):
+        """第一页失败保留旧数据；合法空列表才允许清空。"""
         db_path = str(tmp_path / "test_market.db")
         with patch("services.importers.getcontracts.DATABASE_PATH", db_path):
             await init_db()
             await save_contract_list(10000002, [MOCK_CONTRACT], complete=True, fetch_time="T1")
-            assert await save_contract_list(10000002, [], complete=False, fetch_time="T2") == 0
+            session = MagicMock()
+            session.fetch_state = AsyncMock(return_value=first_page)
+            contracts, complete = await _fetch_contract_pages_detailed(session, 10000002)
+            assert complete is (first_page[0] == 200)
+            assert await save_contract_list(10000002, contracts, complete=complete, fetch_time="T2") == 0
 
         conn = sqlite3.connect(db_path)
-        assert conn.execute("SELECT COUNT(*) FROM public_contracts").fetchone()[0] == 1
+        rows = conn.execute("SELECT contract_id, fetch_time FROM public_contracts").fetchall()
+        assert rows == ([] if complete else [(100001, "T1")])
         conn.close()
 
     def test_format_type_map(self):

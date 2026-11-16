@@ -17,7 +17,8 @@ import sys
 
 from core.logger import log
 
-APP_USER_MODEL_ID = "EVEAssistant.IndustrialAssistant"
+#: 曙光分支独立 AppID：与国际版同机安装时任务栏按钮/固定项互不归并
+APP_USER_MODEL_ID = "EVEAssistantShuguang.IndustrialAssistant"
 
 
 def set_app_user_model_id(app_id: str = APP_USER_MODEL_ID) -> bool:

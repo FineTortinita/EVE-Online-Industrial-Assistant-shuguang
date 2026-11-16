@@ -1978,13 +1978,14 @@ class _MarketQuoteWorker(QThread):
             self.result_signal.emit({}, f"行情刷新失败：{e}")
 
     async def _fetch_all(self) -> dict:
+        from core.constants import esi_url
         from services.client import APIClient
 
         now_text = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         quotes: dict[tuple[int, int], dict] = {}
         async with APIClient(timeout=60) as client:
             for type_id, region_id in self._pairs:
-                base = f"https://esi.evetech.net/latest/markets/{region_id}/orders/?type_id={type_id}&order_type=all"
+                base = esi_url(f"/markets/{region_id}/orders/", type_id=type_id, order_type="all")
                 status, first, headers = await client.fetch_state(f"{base}&page=1")
                 if status is None or status == 404:
                     continue

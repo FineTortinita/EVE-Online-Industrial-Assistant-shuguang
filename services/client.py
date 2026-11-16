@@ -11,6 +11,7 @@ import aiohttp
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from core.logger import log
+from core.net_proxy import PROXY_MIDDLEWARES
 
 
 class RateLimiter:
@@ -57,6 +58,33 @@ GLOBAL_ESI_LIMITER = RateLimiter(rate=20.0, burst=40)
 #: 官方实测 `X-Ratelimit-Limit: 12000/15m`、每个 2XX `X-Ratelimit-Used: 2`
 #: ⇒ 持续上限 = 12000 ÷ 2 ÷ 900 ≈ **6.67 req/s**，旧的 20 req/s 是它的 3 倍。
 MARKET_ORDER_LIMITER = RateLimiter(rate=12000 / 2 / 900, burst=40)
+
+
+#: 曙光 ESI 仍是旧式「错误限额」：每个非 2xx 计 1 次，窗口内耗尽回 420（不是 429）。
+_RATE_LIMITED = (420, 429)
+#: 错误余量低于此值时整进程暂停到窗口重置，避免把余量打穿被 420 封窗。
+_ERROR_LIMIT_FLOOR = 10
+#: 暂停截止时刻（monotonic）；所有请求在 `_wait_error_window` 里共享它。
+_error_pause_until = 0.0
+
+
+async def _wait_error_window() -> None:
+    delay = _error_pause_until - time.monotonic()
+    if delay > 0:
+        await asyncio.sleep(delay)
+
+
+def _note_error_limit(headers) -> None:
+    """读 `X-Esi-Error-Limit-Remain/Reset`；余量低时登记全局暂停。"""
+    global _error_pause_until
+    try:
+        remain = int(headers.get("X-Esi-Error-Limit-Remain"))
+        reset = int(headers.get("X-Esi-Error-Limit-Reset"))
+    except (TypeError, ValueError):
+        return
+    if remain <= _ERROR_LIMIT_FLOOR:
+        _error_pause_until = max(_error_pause_until, time.monotonic() + reset + 1)
+        log.warning("ESI 错误限额余量 %s，暂停 %ss 至窗口重置", remain, reset)
 
 
 def _is_market_order_url(url: str) -> bool:
@@ -114,13 +142,19 @@ class APIClient:
             return MARKET_ORDER_LIMITER
         return self._limiter
 
+    async def _acquire(self, url: str) -> None:
+        """请求前：先等错误限额窗口（若已登记暂停），再按限流桶取令牌。"""
+        await _wait_error_window()
+        await self._limiter_for(url).acquire()
+
     async def __aenter__(self):
         self.semaphore = asyncio.Semaphore(self._concurrency)
         self.session = aiohttp.ClientSession(
             headers={
                 "Accept": "application/json",
                 "User-Agent": self._user_agent,
-            }
+            },
+            middlewares=PROXY_MIDDLEWARES,
         )
         return self
 
@@ -140,7 +174,11 @@ class APIClient:
         if retry_after is not None and str(retry_after).isdigit():
             wait = int(retry_after)
         else:
-            wait = _rate_reset_seconds(resp.headers) or 30
+            try:
+                reset = int(resp.headers.get("X-Esi-Error-Limit-Reset", 0))
+            except (TypeError, ValueError):
+                reset = 0
+            wait = reset or _rate_reset_seconds(resp.headers) or 30
         wait = max(1, min(wait, 900))
         if wait > 300:
             log.warning("ESI 429 要求等待 %ss（>300s），本轮不阻塞、按失败处理", wait)
@@ -149,7 +187,9 @@ class APIClient:
 
     @staticmethod
     def _note_rate_headers(url: str, headers) -> None:
-        """读 `X-Ratelimit-*`（02-05）：余量低时告警，便于定位「快打满」的批次。"""
+        """读 `X-Ratelimit-*`（02-05）：余量低时告警，便于定位「快打满」的批次；
+        同时读曙光的错误限额头（见 `_note_error_limit`）。"""
+        _note_error_limit(headers)
         remaining = _rate_remaining(headers)
         if remaining is None:
             return
@@ -171,11 +211,11 @@ class APIClient:
 
         @retry_deco
         async def _do_fetch() -> dict | None:
-            await self._limiter_for(url).acquire()
+            await self._acquire(url)
             async with self.semaphore:  # type: ignore[union-attr]
                 async with self.session.get(url, timeout=self._timeout) as resp:  # type: ignore[union-attr]
                     self._note_rate_headers(url, resp.headers)
-                    if resp.status == 429:
+                    if resp.status in _RATE_LIMITED:
                         await self._handle_rate_limit(resp)
                         raise aiohttp.ClientError("Rate limited, retrying...")
                     if resp.status == 404:
@@ -196,11 +236,11 @@ class APIClient:
         """GET 请求，返回原始 JSON（列表响应，如订单簿页），404/超时返回 None"""
         for attempt in range(self._retries):
             try:
-                await self._limiter_for(url).acquire()
+                await self._acquire(url)
                 async with self.semaphore:  # type: ignore[union-attr]
                     async with self.session.get(url, timeout=self._timeout) as resp:  # type: ignore[union-attr]
                         self._note_rate_headers(url, resp.headers)
-                        if resp.status == 429:
+                        if resp.status in _RATE_LIMITED:
                             await self._handle_rate_limit(resp)
                             if attempt + 1 < self._retries:
                                 continue
@@ -232,12 +272,12 @@ class APIClient:
         """
         for attempt in range(self._retries):
             try:
-                await self._limiter_for(url).acquire()
+                await self._acquire(url)
                 async with self.semaphore:  # type: ignore[union-attr]
                     async with self.session.get(url, timeout=self._timeout) as resp:  # type: ignore[union-attr]
                         headers = dict(resp.headers)
                         self._note_rate_headers(url, resp.headers)
-                        if resp.status == 429:
+                        if resp.status in _RATE_LIMITED:
                             await self._handle_rate_limit(resp)
                             if attempt + 1 < self._retries:
                                 continue
@@ -260,10 +300,11 @@ class APIClient:
         """GET 请求，返回响应头（X-Pages 等）；非 200 返回 None"""
         for attempt in range(self._retries):
             try:
-                await self._limiter_for(url).acquire()
+                await self._acquire(url)
                 async with self.semaphore:  # type: ignore[union-attr]
                     async with self.session.get(url, timeout=self._timeout) as resp:  # type: ignore[union-attr]
-                        if resp.status == 429:
+                        self._note_rate_headers(url, resp.headers)
+                        if resp.status in _RATE_LIMITED:
                             await self._handle_rate_limit(resp)
                             if attempt + 1 < self._retries:
                                 continue
@@ -282,10 +323,11 @@ class APIClient:
         retries_left = max(self._retries, 3)
         while retries_left > 0:
             try:
-                await self._limiter_for(url).acquire()
+                await self._acquire(url)
                 async with self.semaphore:  # type: ignore[union-attr]
                     async with self.session.get(url, timeout=self._timeout) as resp:  # type: ignore[union-attr]
-                        if resp.status == 429:
+                        self._note_rate_headers(url, resp.headers)
+                        if resp.status in _RATE_LIMITED:
                             await self._handle_rate_limit(resp)
                             retries_left -= 1
                             continue
@@ -302,10 +344,11 @@ class APIClient:
         """POST JSON 请求，返回解析后的 JSON；404/超时返回 None。"""
         for attempt in range(self._retries):
             try:
-                await self._limiter_for(url).acquire()
+                await self._acquire(url)
                 async with self.semaphore:  # type: ignore[union-attr]
                     async with self.session.post(url, json=json, timeout=self._timeout) as resp:  # type: ignore[union-attr]
-                        if resp.status == 429:
+                        self._note_rate_headers(url, resp.headers)
+                        if resp.status in _RATE_LIMITED:
                             await self._handle_rate_limit(resp)
                             if attempt + 1 < self._retries:
                                 continue
@@ -325,10 +368,11 @@ class APIClient:
         retries_left = max(self._retries, 3)
         while retries_left > 0:
             try:
-                await self._limiter_for(url).acquire()
+                await self._acquire(url)
                 async with self.semaphore:  # type: ignore[union-attr]
                     async with self.session.get(url, timeout=self._timeout) as resp:  # type: ignore[union-attr]
-                        if resp.status == 429:
+                        self._note_rate_headers(url, resp.headers)
+                        if resp.status in _RATE_LIMITED:
                             await self._handle_rate_limit(resp)
                             retries_left -= 1
                             continue

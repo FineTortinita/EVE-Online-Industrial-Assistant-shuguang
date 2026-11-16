@@ -19,13 +19,12 @@ from datetime import UTC, datetime
 import aiohttp
 import aiosqlite
 
-from core.constants import TRADE_HUB_IDS
+from core.constants import TRADE_HUB_IDS, esi_url
 from core.logger import log
 from core.paths import market_db_path
 from services.client import GLOBAL_ESI_LIMITER, APIClient
 
 DATABASE_PATH = market_db_path()
-ESI_BASE_URL = "https://esi.evetech.net/latest"
 
 TRADE_REGIONS = list(TRADE_HUB_IDS.items())
 
@@ -135,20 +134,21 @@ async def _fetch_contract_pages_detailed(session, region_id: int) -> tuple[list[
     """
     all_contracts: list[dict] = []
     complete = True
-    url = f"{ESI_BASE_URL}/contracts/public/{region_id}/"
+    path = f"/contracts/public/{region_id}/"
     is_api_client = hasattr(session, "fetch_raw")
 
     if is_api_client:
-        headers = await session.get_headers(f"{url}?page=1")
-        if headers is None:
-            log.warning(f"  区域 {region_id} 合同请求失败: 页数探测失败")
+        status, data, headers = await session.fetch_state(esi_url(path, page=1))
+        # 第一页失败必须标不完整：旧实现 `fetch_raw(...) or []` 把失败压平成「合法空」，
+        # complete 仍为 True，调用方会拿空列表覆盖已有的合同缓存。
+        if status is None or data is None:
+            log.warning(f"  区域 {region_id} 合同请求失败: 第一页拉取失败")
             return [], False
         total_pages = int(headers.get("X-Pages", 1))
-        data = await session.fetch_raw(f"{url}?page=1") or []
         all_contracts.extend(data)
     else:
         await GLOBAL_ESI_LIMITER.acquire()
-        async with session.get(url, params={"page": 1}) as resp:
+        async with session.get(esi_url(path, page=1)) as resp:
             if resp.status != 200:
                 log.warning(f"  区域 {region_id} 合同请求失败: HTTP {resp.status}")
                 return [], False
@@ -167,13 +167,13 @@ async def _fetch_contract_pages_detailed(session, region_id: int) -> tuple[list[
         async with sem:
             try:
                 if is_api_client:
-                    data = await session.fetch_raw(f"{url}?page={p}")
+                    data = await session.fetch_raw(esi_url(path, page=p))
                     if data is None:
                         complete = False
                         return []
                     return data
                 await GLOBAL_ESI_LIMITER.acquire()
-                async with session.get(url, params={"page": p}) as resp:
+                async with session.get(esi_url(path, page=p)) as resp:
                     if resp.status == 200:
                         return await resp.json()
                     complete = False
@@ -213,7 +213,7 @@ async def _fetch_contract_items_detailed(session, contract_ids: list[int]) -> tu
     failed_ids: set[int] = set()
 
     async def get_items(cid: int):
-        url = f"{ESI_BASE_URL}/contracts/public/items/{cid}/"
+        url = esi_url(f"/contracts/public/items/{cid}/")
         async with sem:
             try:
                 if is_api_client:
@@ -436,7 +436,7 @@ async def _fetch_issuer_names_async(
                 break
             chunk = ids[start : start + _NAMES_CHUNK]
             try:
-                data = await session.post(f"{ESI_BASE_URL}/universe/names/", json=chunk)
+                data = await session.post(esi_url("/universe/names/"), json=chunk)
             except Exception:  # 外部 HTTP：取名失败不该让整次补齐任务失败
                 log.exception("发布者批量取名失败，跳过本批 %d 个", len(chunk))
                 continue
@@ -447,7 +447,7 @@ async def _fetch_issuer_names_async(
                 if should_stop is not None and should_stop():
                     break
                 try:
-                    single = await session.post(f"{ESI_BASE_URL}/universe/names/", json=[one])
+                    single = await session.post(esi_url("/universe/names/"), json=[one])
                 except Exception:  # 同上
                     log.exception("发布者单个取名失败 issuer_id=%s", one)
                     continue

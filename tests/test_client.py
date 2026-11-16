@@ -82,6 +82,37 @@ class TestAPIClient:
 
         asyncio.run(run())
 
+    @pytest.mark.parametrize("status", [420, 429])
+    @pytest.mark.parametrize(
+        ("method", "text", "expected"),
+        [
+            ("fetch", '{"ok": true}', {"ok": True}),
+            ("fetch_raw", "[]", []),
+            ("fetch_state", "[]", (200, [], {})),
+            ("get_headers", "[]", {}),
+            ("fetch_required", '{"ok": true}', {"ok": True}),
+            ("post", '{"ok": true}', {"ok": True}),
+            ("get_text", "ok", "ok"),
+        ],
+    )
+    def test_rate_limit_then_success(self, monkeypatch, status, method, text, expected):
+        """420/429 均可重试成功，错误限额头不能把请求当永久失败。"""
+        monkeypatch.setattr("services.client._error_pause_until", 0.0)
+        monkeypatch.setattr("services.client.asyncio.sleep", AsyncMock())
+
+        async def run():
+            async with APIClient(retries=2, limiter=Mock(acquire=AsyncMock())) as client:
+                limited = self._make_mock_resp(
+                    status=status,
+                    headers={"X-Esi-Error-Limit-Remain": "0", "X-Esi-Error-Limit-Reset": "1"},
+                )
+                request = Mock(side_effect=[limited, self._make_mock_resp(text=text)])
+                setattr(client.session, "post" if method == "post" else "get", request)
+                assert await getattr(client, method)("https://ali-esi.evepc.163.com/latest/test/") == expected
+                assert request.call_count == 2
+
+        asyncio.run(run())
+
     # ── test_fetch_timeout ───────────────────────────────────
 
     def test_fetch_timeout(self):
@@ -185,6 +216,32 @@ class TestRateLimiter:
 
 
 class TestRateLimitGroups:
+    @pytest.mark.parametrize("remaining, paused", [(0, True), (100, False)])
+    def test_error_limit_headers_pause_next_request(self, monkeypatch, remaining, paused):
+        """成功响应也读取错误限额头，余量耗尽时下一次请求先等待重置。"""
+        sleeps = AsyncMock()
+        monkeypatch.setattr("services.client._error_pause_until", 0.0)
+        monkeypatch.setattr("services.client.asyncio.sleep", sleeps)
+
+        async def run():
+            async with APIClient(limiter=Mock(acquire=AsyncMock())) as client:
+                client.session.get = Mock(
+                    side_effect=[
+                        TestAPIClient._make_mock_resp(
+                            headers={"X-Esi-Error-Limit-Remain": str(remaining), "X-Esi-Error-Limit-Reset": "30"}
+                        ),
+                        TestAPIClient._make_mock_resp(),
+                    ]
+                )
+                for _ in range(2):
+                    assert await client.fetch("https://ali-esi.evepc.163.com/latest/test/") == {"ok": True}
+
+        asyncio.run(run())
+        if paused:
+            assert any(29 <= call.args[0] <= 31 for call in sleeps.await_args_list)
+        else:
+            sleeps.assert_not_awaited()
+
     def test_order_route_uses_market_order_limiter(self):
         """订单路由归 `market-order` 组（12000/15m、2 tokens/2XX ≈ 6.67 req/s），其余用全局桶。"""
         client = APIClient()
@@ -210,8 +267,9 @@ class TestRateLimitGroups:
                 asyncio.run(APIClient._handle_rate_limit(resp))
         assert not sleeps or max(sleeps) <= 300, f"不该阻塞等待 900s：{sleeps}"
 
-    def test_429_short_retry_after_is_honored(self):
-        """窗口内的 Retry-After（30s）照实等待。"""
+    @pytest.mark.parametrize("headers", [{"Retry-After": "30"}, {"X-Esi-Error-Limit-Reset": "30"}])
+    def test_429_short_retry_after_is_honored(self, headers):
+        """Retry-After 和曙光错误限额 Reset 均照实等待。"""
         from unittest.mock import patch
 
         sleeps: list[float] = []
@@ -220,7 +278,7 @@ class TestRateLimitGroups:
             sleeps.append(sec)
 
         resp = Mock()
-        resp.headers = {"Retry-After": "30"}
+        resp.headers = headers
         with patch("services.client.asyncio.sleep", _fake_sleep):
             asyncio.run(APIClient._handle_rate_limit(resp))
         assert sleeps == [30]

@@ -235,8 +235,8 @@ def main():
         sys.exit(1)
 
     app = QApplication(sys.argv)
-    app.setApplicationName("EVE 商人助手")
-    app.setOrganizationName("EVEAssistant")
+    app.setApplicationName("EVE 商人助手·曙光")
+    app.setOrganizationName("EVEAssistantShuguang")
     # 程序图标：打包后 exe 自带（PyInstaller 的 `--icon`），但源码运行时任务栏/标题栏
     # 要从资源取。设在 QApplication 上 → 之后创建的所有窗口（含 splash）都继承。
     from ui_qml.app_icon import app_icon

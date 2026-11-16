@@ -103,8 +103,9 @@ async def test_fetch_history_calls_correct_url():
 
     mock_session.get.assert_called_once()
     args, kwargs = mock_session.get.call_args
-    assert "markets/10000002/history/" in args[0]
-    assert kwargs.get("params") == {"type_id": 1001}
+    assert args[0].startswith("https://ali-esi.evepc.163.com/latest/markets/10000002/history/")
+    # 网易主机同时服务晨曦与曙光：必须显式锁 datasource，不能吃服务端默认值
+    assert kwargs.get("params") == {"datasource": "infinity", "type_id": 1001}
 
 
 # ── save_cache + get_cached_history ──

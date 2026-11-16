@@ -51,7 +51,7 @@ DEBOUNCE_SECONDS = 12.0  # 距最近一次真实变更安静多少秒后再重�
 FORCE_KILL_SETTLE = 1.5  # 强制终止后等待 OS 释放 SQLite 文件句柄，再启动新进程
 
 # dev.py 自身的单实例锁：与 Main.py 的 instance.lock 分离，启动器才能启动应用子进程
-DEV_LOCK = Path.home() / ".eve-assistant" / "dev.lock"
+DEV_LOCK = Path.home() / ".eve-assistant-shuguang" / "dev.lock"
 
 # 全新开箱模式（--fresh）：隔离目录模拟发行版环境。database/data 全部写入该目录，
 # 不碰开发仓库；core.paths.app_root() 通过环境变量 EVE_ASSISTANT_APP_ROOT 指向它。

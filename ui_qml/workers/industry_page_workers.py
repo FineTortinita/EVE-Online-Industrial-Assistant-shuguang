@@ -76,9 +76,10 @@ class PlanPriceRefreshWorker(QThread):
             log.info("定向价格: 所有物品均在缓存有效期内，跳过刷新")
             return 0
 
-        ESI_BASE = "https://esi.evetech.net/latest"
+        from core.constants import esi_url
+
         REGION_JITA = 10000002
-        orders_url = f"{ESI_BASE}/markets/{REGION_JITA}/orders/"
+        orders_url = esi_url(f"/markets/{REGION_JITA}/orders/")
 
         type_orders: dict[int, dict] = {}
         failed: list[int] = []
@@ -87,7 +88,7 @@ class PlanPriceRefreshWorker(QThread):
 
             async def fetch_side(tid: int, order_type: str) -> list[dict] | None:
                 """一个方向的全部页；None = 拉取失败（02-08），[] = 合法空（02-11 分页）。"""
-                base = f"{orders_url}?type_id={tid}&order_type={order_type}"
+                base = f"{orders_url}&type_id={tid}&order_type={order_type}"
                 status, first, headers = await client.fetch_state(f"{base}&page=1")
                 if status is None:
                     log.warning("拉取 %s type_id=%s 失败（网络/限流）", order_type, tid)

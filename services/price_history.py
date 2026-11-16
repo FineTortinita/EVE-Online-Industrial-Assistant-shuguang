@@ -7,9 +7,9 @@ from datetime import UTC, date, datetime, timedelta
 
 import aiohttp
 
+from core.constants import ESI_BASE, ESI_DATASOURCE
 from services.database_manager import get_db
 
-ESI_BASE_URL = "https://esi.evetech.net/latest"
 REGION_ID = 10000002  # The Forge
 
 #: ESI `/markets/{region_id}/history/` 的日更时刻（UTC，实测响应 `Expires` 为当日 11:05、
@@ -92,8 +92,8 @@ async def fetch_history(
     （临时 APIClient 路径）时条件请求不支持，按普通 GET 处理。
     etag_holder: 传入一个 list 时，200 响应会把新 ETag append 进去（供批量导入落库）。
     """
-    url = f"{ESI_BASE_URL}/markets/{region_id}/history/"
-    params = {"type_id": type_id}
+    url = f"{ESI_BASE}/markets/{region_id}/history/"
+    params: dict[str, str | int] = {"datasource": ESI_DATASOURCE, "type_id": type_id}
     headers = {"If-None-Match": etag} if etag else None
 
     async def _do(s: aiohttp.ClientSession) -> list[dict] | None | object:

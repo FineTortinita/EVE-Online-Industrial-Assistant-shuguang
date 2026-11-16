@@ -124,7 +124,7 @@ HUB_REGIONS: dict[str, int] = {
     "Amarr": 10000043,
     "Dodixie": 10000032,
     "Rens": 10000030,
-    "Hek": 10000028,
+    "Hek": 10000042,
 }
 
 #: 8 种基础矿物（CCP MPI 口径）+ PLEX —— 价格为**合成值**，不是真实行情

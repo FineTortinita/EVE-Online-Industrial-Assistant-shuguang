@@ -56,7 +56,7 @@ def _exception_value(exc_info) -> BaseException | None:
 def write_crash_dump(exc_info, crash_dir: Path | None = None) -> Path | None:
     """写崩溃转储文件（环境信息表头 + traceback），返回文件路径；失败返回 None。
 
-    crash_dir 默认为 ~/.eve-assistant/crashes，可传参便于测试。
+    crash_dir 默认为 ~/.eve-assistant-shuguang/crashes，可传参便于测试。
     文件名带微秒，避免同一秒多线程崩溃互相覆盖。
     """
     target = crash_dir if crash_dir is not None else paths.crashes_dir()
