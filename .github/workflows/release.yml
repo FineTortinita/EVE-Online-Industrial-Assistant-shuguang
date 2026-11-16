@@ -82,6 +82,7 @@ jobs:
         echo "安装包按 $TAG 处理（需要打包：$NEEDED）"
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        PYTHONUTF8: "1"
 
     # 模板库（reference.db/blueprint.db）不入版本控制，打包前无头生成；否则发行包缺静态数据，
     # 每个用户首启都要重跑 SDE 下载与解析 —— README 向用户承诺的是「内置、走本地快路径」。
