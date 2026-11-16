@@ -28,10 +28,10 @@
 
 from __future__ import annotations
 
+from core.constants import esi_url
 from core.logger import log
 from services.user_settings import get_include_corp_wallet
 from ui_qml.workers.esi_skill_worker import (
-    ESI_BASE,
     EsiAuthRevoked,
     EsiScopeMissing,
     EsiSkillImportWorker,
@@ -166,7 +166,7 @@ class EsiWalletOrdersWorker(EsiSkillImportWorker):
 
     async def _character_corp(self, client, access: str, char_id: int) -> int:
         """角色所属军团 id。`/characters/{id}/` 是**公开**接口，不需要任何 scope。"""
-        detail = await _get_json(client, f"{ESI_BASE}/characters/{char_id}/", access)
+        detail = await _get_json(client, esi_url(f"/characters/{char_id}/"), access)
         return int((detail or {}).get("corporation_id") or 0)
 
     async def _pull_corp_wallet(self, client, access: str, corp_id: int) -> float:
@@ -179,7 +179,7 @@ class EsiWalletOrdersWorker(EsiSkillImportWorker):
             return 0.0
         rows = await _get_json(
             client,
-            f"{ESI_BASE}/corporations/{corp_id}/wallets/",
+            esi_url(f"/corporations/{corp_id}/wallets/"),
             access,
             scope_hint="军团钱包",
         )
@@ -189,13 +189,13 @@ class EsiWalletOrdersWorker(EsiSkillImportWorker):
         """一个角色的 (钱包余额, 未结挂单)。"""
         wallet = await _get_json(
             client,
-            f"{ESI_BASE}/characters/{char_id}/wallet/",
+            esi_url(f"/characters/{char_id}/wallet/"),
             access,
             scope_hint=_WALLET_SCOPE_HINT,
         )
         orders = await _get_json(
             client,
-            f"{ESI_BASE}/characters/{char_id}/orders/",
+            esi_url(f"/characters/{char_id}/orders/"),
             access,
             scope_hint=_ORDERS_SCOPE_HINT,
         )

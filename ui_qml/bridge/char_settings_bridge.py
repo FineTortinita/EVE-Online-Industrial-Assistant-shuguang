@@ -40,6 +40,7 @@ from core.char_settings_common import (
 from services.char_config_resolver import load_all_data, save_all_data
 from services.implant_loader import load_implants
 from ui_qml import icons
+from ui_qml.bridge.input_dialog import InputQmlDialog
 from ui_qml.bridge.message_dialog import FMessageDialog
 from ui_qml.dialog_host import DialogBridge, QmlDialog
 from ui_qml.workers.esi_skill_worker import EsiSkillImportWorker
@@ -485,14 +486,38 @@ class CharSettingsBridge(DialogBridge):
         if self._esi_busy:
             return
         self._esi_busy = True
-        self._esi_status = "正在等待浏览器授权…" if force_browser else "正在从 ESI 获取…"
+        self._esi_status = "正在打开网易授权页…" if force_browser else "正在从 ESI 获取…"
         self.stateChanged.emit()
 
         worker = EsiSkillImportWorker(self._current, force_browser=force_browser)
         worker.result_signal.connect(self._on_esi_result)
         worker.finished_signal.connect(self._on_esi_finished)
+        worker.redirect_requested.connect(self._on_redirect_requested)
         self._esi_worker = worker
         worker.start()
+
+    def _on_redirect_requested(self, _authorize_url: str) -> None:
+        """浏览器已打开网易授权页：弹框让用户把登录后跳到的空白页地址粘贴回来。
+
+        取消 = 交回 None，worker 静默结束（不算失败、不弹错误框）。
+        """
+        self._esi_status = "请在浏览器完成网易登录，然后粘贴空白页地址…"
+        self.stateChanged.emit()
+        text, ok = InputQmlDialog.get_text(
+            self.host_widget(),
+            "粘贴授权回跳地址",
+            "登录网易并选好角色后会跳到一个空白页，\n把它地址栏里的完整网址粘贴到这里：",
+        )
+        worker = self._esi_worker
+        if worker is None:
+            return
+        pasted = text.strip() if ok else ""
+        worker.submit_redirect(pasted or None)
+        if not pasted:
+            # 取消 / 空提交：worker 会静默退出、不发 finished_signal，忙碌态得在这里解除
+            self._esi_busy = False
+            self._esi_status = "已取消授权"
+            self.stateChanged.emit()
 
     def _on_esi_result(self, payload: dict) -> None:
         """合并 ESI 数据并落盘。
@@ -568,10 +593,10 @@ class CharSettingsBridge(DialogBridge):
         self.stateChanged.emit()
 
     def stop(self) -> None:
-        """关窗收尾：中断回环等待并等它收尾。
+        """关窗收尾：中断「等粘贴」并等 worker 收尾。
 
-        `detach_worker` 只等 500ms，而 worker 里回环 `handle_request()` 的超时是
-        0.5s —— 检查点刚好够密，不用额外的中断机制。
+        `detach_worker` 只等 500ms，而 worker 等粘贴的检查间隔是 0.5s ——
+        检查点刚好够密，不用额外的中断机制。
         """
         detach_worker(self._esi_worker)
         self._esi_worker = None

@@ -234,6 +234,7 @@ def test_post_token_retry_policy(monkeypatch, statuses, expect_calls, expect_ok)
     所以钉三条：5xx 退避重试、4xx 不重试、`_TokenError.status` 带上真实状态码
     （调用方靠它把「服务端故障」与「授权失效」分成相反的文案）。
     """
+    monkeypatch.setattr(esw, "CLIENT_ID", "test-client")
     monkeypatch.setattr(esw, "_TOKEN_RETRY_BASE_S", 0.0)  # 测试里不退避
     client = _FakeClient(statuses)
     if expect_ok:
@@ -243,3 +244,70 @@ def test_post_token_retry_policy(monkeypatch, statuses, expect_calls, expect_ok)
             asyncio.run(esw._post_token(client, {"grant_type": "refresh_token"}))
         assert err.value.status == statuses[-1]
     assert client.session.calls == expect_calls
+
+
+@pytest.mark.parametrize(
+    ("client_id", "claims", "match"),
+    [
+        ("test-client", {"azp": "test-client", "aud": ["EVE Online"]}, None),
+        ("test-client", {"aud": "EVE Online"}, None),  # 网易 aud 口径未实测：不据此拒绝
+        ("test-client", {"azp": "other", "aud": ["test-client"]}, "不属于本应用"),
+        ("", {"azp": ""}, "不属于本应用"),
+        ("test-client", {"iss": "login.eveonline.com"}, "不是曙光"),  # 国际服令牌
+        ("test-client", {"exp": 999}, "已过期"),
+        ("test-client", {"azp": "test-client", "tenant": "infinity"}, None),  # 实测曙光令牌形状
+        ("test-client", {"azp": "test-client", "tenant": "serenity"}, "不是曙光"),
+    ],
+    ids=["azp-match", "aud-only", "azp-mismatch", "empty-client", "tq-issuer", "expired", "infinity", "serenity"],
+)
+def test_check_claims_boundary(monkeypatch, client_id, claims, match):
+    monkeypatch.setattr(esw, "CLIENT_ID", client_id)
+    full = {"iss": f"https://{esw.SSO_ISSUER}", "exp": 2000, **claims}
+    if match is None:
+        esw._check_claims(full, now_ts=1000)
+    else:
+        with pytest.raises(RuntimeError, match=match):
+            esw._check_claims(full, now_ts=1000)
+
+
+def test_authorize_url_carries_device_id_behind_logoff():
+    """回归（用户实测）：授权地址缺 `device_id` 时网易登录页直接回
+    `{"Message":"An error has occurred."}`。地址必须先经 /account/logoff，
+    再回跳到带 device_id / PKCE / realm 的授权页。"""
+    from urllib.parse import parse_qs, urlparse
+
+    url = urlparse(esw._authorize_url("chal", "st", device_id="dev-1"))
+    assert (url.netloc, url.path) == ("login-infinity.evepc.163.com", "/account/logoff")
+    inner = urlparse(parse_qs(url.query)["returnUrl"][0])
+    assert inner.path == "/v2/oauth/authorize"
+    q = {k: v[0] for k, v in parse_qs(inner.query).items()}
+    assert q["device_id"] == "dev-1" and q["realm"] == "ESI" and q["state"] == "st"
+    assert q["client_id"] == esw.CLIENT_ID and q["redirect_uri"] == esw.CALLBACK_URL
+    assert q["code_challenge"] == "chal" and q["code_challenge_method"] == "S256"
+
+
+_STATE = "st-123"
+_CB = esw.CALLBACK_URL
+
+
+@pytest.mark.parametrize(
+    ("pasted", "match"),
+    [
+        (f"{_CB}?code=abc&state={_STATE}", None),
+        (f"  {_CB}#code=abc&state={_STATE}\n", None),  # 隐式模式参数在 fragment、两端带空白
+        (f"https://evil.example/ui/oauth2-redirect.html?code=abc&state={_STATE}", "不是网易"),
+        (f"http://ali-esi.evepc.163.com/ui/oauth2-redirect.html?code=abc&state={_STATE}", "不是网易"),
+        (f"{_CB}?code=abc&state=old", "state"),
+        (f"{_CB}?error=access_denied&state={_STATE}", "拒绝"),
+        (f"{_CB}?state={_STATE}", "没有授权码"),
+        ("", "没有粘贴"),
+    ],
+    ids=["query", "fragment", "foreign-host", "http", "stale-state", "denied", "no-code", "empty"],
+)
+def test_parse_redirect(pasted, match):
+    """粘贴回跳地址的边界：只认官方回调页 + 本次 state，其余一律拒绝（文案直接给用户看）。"""
+    if match is None:
+        assert esw.parse_redirect(pasted, _STATE) == "abc"
+    else:
+        with pytest.raises(RuntimeError, match=match):
+            esw.parse_redirect(pasted, _STATE)

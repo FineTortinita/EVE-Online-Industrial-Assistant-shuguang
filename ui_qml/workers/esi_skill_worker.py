@@ -1,16 +1,21 @@
-"""从 ESI 导入角色技能 —— OAuth PKCE + 回环回调 + 拉取。
+"""从曙光 ESI 导入角色技能 —— OAuth PKCE + 手动粘贴回跳地址 + 拉取。
 
 **为什么在 `ui_qml/workers/` 而不是 `services/`**：整套流程只有一个调用方
 （人物设置对话框的导入按钮），按本仓克制条款第 1 条不足以新开服务模块；而
 「UI 异步 = QThread + Signal」的既定位置就是这里，且已有 worker 直连 ESI 的先例
 （`ui_qml/workers/order_workers.py`）。
 
-**安全口径**：走 PKCE 公共客户端，**不带 client_secret** —— 官方 PKCE 示例明写
-「we do not use the client secret in this flow」。`CLIENT_ID` 按公共客户端设计就是
-公开的，可以内置；secret 一律不落代码、不落库。
+**为什么是「粘贴回跳地址」而不是本地回环回调**（2026-11-16 调研，见 docs/dev/decisions.md）：
+网易没有公开的曙光开发者门户，无法为本应用注册 client_id 和 localhost 回调。现有曙光
+第三方工具（开明网、eve.navexor.top）都复用网易官方 ESI 文档页内置的公共客户端
+`bc90aa49…`，其回调固定为官方的 `https://ali-esi.evepc.163.com/ui/oauth2-redirect.html`。
+那个页面脱离文档页打开时是空白页，授权码留在地址栏里 —— 用户把地址栏复制回来即可。
 
-**一次授权 = 一个角色**：令牌 `sub` 是 `CHARACTER:EVE:<id>`，用户在 CCP 页面上
-选角色。多账号 / 一账号多角色 = 每个角色各点一次导入。
+**安全口径**：走 PKCE 公共客户端，**不带 client_secret**；`state` 在本地生成并逐字校验，
+粘贴进来的地址必须是官方回调页，否则拒绝（防止把别处的 code 塞进来）。
+
+**一次授权 = 一个角色**：令牌 `sub` 形如 `CHARACTER:<租户>:<id>`，用户在网易页面上选角色。
+多账号 / 一账号多角色 = 每个角色各点一次导入。
 """
 
 from __future__ import annotations
@@ -20,29 +25,34 @@ import base64
 import hashlib
 import json
 import secrets
+import threading
 import time
 import webbrowser
 from datetime import UTC, datetime, timedelta
-from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlencode, urlparse
 
 import aiohttp
 from PySide6.QtCore import QThread, Signal
 
+from core.constants import SSO_AUTHORIZE_URL, SSO_ISSUER, SSO_TOKEN_URL, esi_url
 from core.logger import log
 
-#: 新建的专用 Native 应用（PKCE 公共客户端，无 secret）
-CLIENT_ID = "248d379a8723486bbc2a7d6d0c1718a1"
+#: 网易官方 ESI 文档页（https://ali-esi.evepc.163.com/ui/）内置的公共客户端 ID。
+#: 曙光 / 晨曦共用；文档页源码里公开可见，属于 PKCE 公共客户端，不涉及 secret。
+CLIENT_ID = "bc90aa496a404724a93f41b4f4e97761"
 
-CALLBACK_PORT = 8721
+#: 该公共客户端登记的回调页（官方文档页的 OAuth 回跳页）。换令牌时必须原样带上。
+CALLBACK_URL = "https://ali-esi.evepc.163.com/ui/oauth2-redirect.html"
 
-#: ⚠️ 必须是 `localhost` 字面量。EVE 门户明文规定 `http` 回调只允许 localhost，
-#: 填 `127.0.0.1` 会被拒 —— 但**监听**仍然绑回环 IP（见 `_start_callback_server`）。
-CALLBACK_URL = f"http://localhost:{CALLBACK_PORT}/callback"
+#: 网易登录要求授权地址带 `device_id`，缺了授权页直接回 `{"Message":"An error has occurred."}`
+#: （2026-11-16 用户实测）。官方文档页在 configureAuth 里先向这个接口申请（参数照抄其 bundle）；
+#: 接口只认官方页面的 Origin —— 浏览器里做不到，桌面程序直接带上即可。
+DEVICE_INIT_URL = "https://mpay-web.g.mkey.163.com/device/init"
+DEVICE_GAME_ID = "aecfu6bgiuaaaal2-g-ma79"
+DEVICE_ORIGIN = "https://ali-esi.evepc.163.com"
 
-AUTHORIZE_URL = "https://login.eveonline.com/v2/oauth/authorize"
-TOKEN_URL = "https://login.eveonline.com/v2/oauth/token"
-ESI_BASE = "https://esi.evetech.net/latest"
+AUTHORIZE_URL = SSO_AUTHORIZE_URL
+TOKEN_URL = SSO_TOKEN_URL
 
 #: 只请求本功能要用的；应用上另勾的权限是给后续功能预留的，这里不请求也能用
 #: （refresh 时只能传原子集的子集，传了没勾的反而会失败）。
@@ -64,9 +74,8 @@ CORP_WALLET_SCOPE = "esi-wallet.read_corporation_wallets.v1"
 _EXPIRY_MARGIN_S = 60
 _DEFAULT_EXPIRES_IN = 1200
 
-#: 等回调的上限。超时后用户得重新点导入（PKCE 的 verifier 与这次 state 一起作废）。
-#: 给到 10 分钟：EVE 登录带邮箱验证码，收信 + 输码 + 可能的二次验证很容易超过 3 分钟；
-#: 超时太短的后果不是「慢」，而是用户输完码却跳到一个已经关掉的端口。
+#: 等用户粘贴回跳地址的上限。超时后得重新点导入（PKCE 的 verifier 与这次 state 一起作废）。
+#: 给到 10 分钟：网易登录可能要短信 / 扫码，复制地址再回来很容易超过 3 分钟。
 _AUTH_TIMEOUT_S = 600
 
 #: 单请求超时
@@ -211,78 +220,120 @@ def _pkce_pair() -> tuple[str, str]:
 def _jwt_claims(access_token: str) -> dict:
     """解出 JWT 载荷，**不验签**。
 
-    不验签是安全的：这个令牌是我们自己刚经 TLS 从 CCP 的 token 端点直接拿到的，
-    不存在第三方注入令牌的路径；验签是为了防「别人塞给我一个伪造令牌」，那个场景
-    在这里不存在。`sub` 形如 `CHARACTER:EVE:<id>`。
+    不验签的前提：令牌是刚经 TLS 从曙光 token 端点直接拿到的，没有第三方注入路径。
+    但仍校验 iss / exp / aud（`_character_from_claims`），防止把别的服务器或别的应用的
+    令牌当成本应用的身份。
     """
-    seg = access_token.split(".")[1]
-    seg += "=" * (-len(seg) % 4)
-    claims = json.loads(base64.urlsafe_b64decode(seg))
+    try:
+        seg = access_token.split(".")[1]
+        seg += "=" * (-len(seg) % 4)
+        claims = json.loads(base64.urlsafe_b64decode(seg))
+    except (IndexError, ValueError):
+        # 吞的是「不是 JWT / base64 或 JSON 损坏」：按无身份处理，由调用方报重新授权
+        return {}
     return claims if isinstance(claims, dict) else {}
 
 
+def _check_claims(claims: dict, now_ts: float | None = None) -> None:
+    """校验曙光签发方、有效期与客户端声明；声明检查不等同于签名验证。"""
+    iss = str(claims.get("iss") or "")
+    if iss.removeprefix("https://").rstrip("/") != SSO_ISSUER:
+        raise RuntimeError("令牌不是曙光登录服务签发的，请重新授权")
+    exp = claims.get("exp")
+    now = time.time() if now_ts is None else now_ts
+    if not isinstance(exp, int | float) or exp <= now:
+        raise RuntimeError("令牌已过期，请重新授权")
+    # 2026-11-16 实测曙光令牌：iss=login-infinity.evepc.163.com、azp=<client_id>、tenant=infinity、
+    # 无 aud。所以客户端归属看 azp；带了 tenant 就必须是 infinity（挡住晨曦 serenity 令牌）。
+    azp = claims.get("azp")
+    if not CLIENT_ID or (azp is not None and azp != CLIENT_ID):
+        raise RuntimeError("令牌不属于本应用，请重新授权")
+    tenant = claims.get("tenant")
+    if tenant is not None and tenant != "infinity":
+        raise RuntimeError(f"令牌属于 {tenant} 服务器，不是曙光，请重新授权")
+
+
 def _character_from_claims(claims: dict, fallback_id: int | None, fallback_name: str | None) -> tuple[int, str]:
+    """`sub` 形如 `CHARACTER:<租户>:<id>`（国际服租户是 EVE；曙光的租户名以实测为准，只要求 CHARACTER 前缀）。"""
     sub = str(claims.get("sub") or "")
-    char_id = int(sub.rsplit(":", 1)[-1]) if sub.startswith("CHARACTER:EVE:") else fallback_id
+    char_id: int | None = fallback_id
+    if sub.startswith("CHARACTER:"):
+        tail = sub.rsplit(":", 1)[-1]
+        if tail.isdigit():
+            char_id = int(tail)
     char_name = str(claims.get("name") or fallback_name or "")
     if char_id is None or not char_name:
         raise RuntimeError("无法从令牌里确定角色身份，请重新授权")
     return int(char_id), char_name
 
 
-# ── 回环回调 ──
+# ── 回跳地址解析 ──
 
 
-class _CallbackServer(HTTPServer):
-    """一次性回环回调服务器。
+def parse_redirect(pasted: str, expected_state: str) -> str:
+    """校验用户粘贴的回跳地址并取出授权码。
 
-    `timeout` 必须是**亚秒级**：`ui_qml/workers/lifecycle.detach_worker` 只等 500ms，
-    超时设大了每次关窗都会把一个阻塞在 `handle_request()` 的线程漏在外面。
+    官方回调页把参数放在 query（授权码模式）或 fragment（隐式模式）里，两处都看。
+    拒绝条件（任一即抛 RuntimeError，文案直接给用户看）：
+    - 不是官方回调页（主机或路径不符）—— 防止把别的站点的 code 喂进来；
+    - 带 `error` —— 用户在网易页面上点了拒绝；
+    - `state` 与本次发起的不一致 —— CSRF / 粘了上一次的旧地址；
+    - 没有 `code`。
     """
-
-    timeout = 0.5
-    allow_reuse_address = True
-    pending: dict | None = None
-
-
-class _CallbackHandler(BaseHTTPRequestHandler):
-    server: _CallbackServer  # 收窄类型，方便写 pending
-
-    def do_GET(self) -> None:
-        parsed = urlparse(self.path)
-        params = {k: v[0] for k, v in parse_qs(parsed.query).items()}
-        # 只把**真正的授权回调**当结果。浏览器可能顺手请求 /favicon.ico，用户也可能
-        # 手动打开这个地址 —— 那些请求没有 code/error，若也写进 pending，就会把
-        # 「回调 state 不匹配」这个吓人的错误甩给用户。
-        if parsed.path != "/callback" or not (params.get("code") or params.get("error")):
-            self.send_error(404)
-            return
-        self.server.pending = params
-        body = (
-            "<!doctype html><html><head><meta charset='utf-8'><title>授权完成</title></head>"
-            "<body style='font-family:sans-serif;padding:2rem'>授权完成，可以关闭此窗口并回到助手。</body></html>"
-        ).encode()
-        self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-    def log_message(self, *args: object) -> None:
-        """默认实现会往 stderr 打日志；本地一次性回调不需要这些噪音。"""
+    text = (pasted or "").strip()
+    if not text:
+        raise RuntimeError("没有粘贴回跳地址")
+    parsed = urlparse(text)
+    expected = urlparse(CALLBACK_URL)
+    if (parsed.scheme, parsed.netloc.lower(), parsed.path) != (expected.scheme, expected.netloc, expected.path):
+        raise RuntimeError(
+            "粘贴的不是网易授权回跳页地址（应以 https://ali-esi.evepc.163.com/ui/oauth2-redirect.html 开头）"
+        )
+    params = {k: v[0] for k, v in parse_qs(parsed.query).items()}
+    params.update({k: v[0] for k, v in parse_qs(parsed.fragment).items()})
+    if params.get("error"):
+        raise RuntimeError(f"授权被拒绝：{params.get('error_description') or params['error']}")
+    if params.get("state") != expected_state:
+        raise RuntimeError("回跳地址的 state 与本次授权不一致（可能粘贴了旧地址），已中止")
+    code = params.get("code")
+    if not code:
+        raise RuntimeError("回跳地址里没有授权码")
+    return str(code)
 
 
-def _start_callback_server() -> _CallbackServer:
-    # 绑定回环 IP（不是 0.0.0.0 —— 那会暴露到局域网并触发防火墙弹窗）。
-    # URL 里写 localhost、socket 绑 127.0.0.1 是正确组合。
-    return _CallbackServer(("127.0.0.1", CALLBACK_PORT), _CallbackHandler)
+async def _fetch_device_id(session: aiohttp.ClientSession) -> str:
+    """向网易申请一次性设备 ID（授权地址必带）。失败抛 RuntimeError（文案给用户看）。"""
+    query = {
+        "game_id": DEVICE_GAME_ID,
+        "device_type": "PC",
+        "system_name": "Windows",
+        "system_version": "10",
+        "resolution": "1920*1080",
+        "device_model": "x86_64",
+    }
+    headers = {"Origin": DEVICE_ORIGIN, "Content-Type": "application/x-www-form-urlencoded"}
+    try:
+        async with session.get(DEVICE_INIT_URL, params=query, headers=headers, timeout=_TIMEOUT) as resp:
+            text = await resp.text()
+            status = resp.status
+    except (TimeoutError, aiohttp.ClientError) as e:
+        raise RuntimeError(f"网易登录初始化失败（网络）：{e}") from e
+    try:
+        device_id = (json.loads(text).get("device") or {}).get("id")
+    except (ValueError, AttributeError):
+        device_id = None
+    if status != 200 or not device_id:
+        raise RuntimeError(f"网易登录初始化失败（HTTP {status}），请稍后重试")
+    return str(device_id)
 
 
-def _authorize_url(code_challenge: str, state: str, extra_scopes: tuple[str, ...] = ()) -> str:
-    """授权页 URL。`extra_scopes` 给「按开关才要的权限」用。
+def _authorize_url(code_challenge: str, state: str, extra_scopes: tuple[str, ...] = (), *, device_id: str = "") -> str:
+    """浏览器要打开的地址：先经网易 `/account/logoff` 登出残留会话，再回跳授权页。
 
-    默认只要 `SCOPES` —— 用不到的可选能力不该逼用户多授权一次，
-    更不该让 CCP 门户没勾的 scope 把**整个**授权流程弄成 `invalid_scope`。
+    - `device_id`：网易登录必带（见 `DEVICE_INIT_URL`）。
+    - 先登出：浏览器里残留的网易登录态会让授权页报 `Missing Netease token`，
+      现有曙光工具（eve.navexor.top、ceve-market）都是这样绕过的。
+    - `extra_scopes` 给「按开关才要的权限」用；默认只要 `SCOPES`。
     """
     params = {
         "response_type": "code",
@@ -292,8 +343,13 @@ def _authorize_url(code_challenge: str, state: str, extra_scopes: tuple[str, ...
         "code_challenge": code_challenge,
         "code_challenge_method": "S256",
         "state": state,
+        "realm": "ESI",  # 网易 SSO 的授权页参数（官方文档页 configureAuth 里写的就是它）
     }
-    return f"{AUTHORIZE_URL}?{urlencode(params)}"
+    if device_id:
+        params["device_id"] = device_id
+    authorize_path = "/v2/oauth/authorize?" + urlencode(params)
+    sso_root = AUTHORIZE_URL.removesuffix("/v2/oauth/authorize")
+    return f"{sso_root}/account/logoff?{urlencode({'returnUrl': authorize_path})}"
 
 
 # ── HTTP ──
@@ -386,6 +442,9 @@ class EsiSkillImportWorker(QThread):
 
     finished_signal = Signal(bool, str)  # success, 错误信息
     result_signal = Signal(dict)
+    #: 浏览器已打开授权页，请主线程弹框让用户粘贴回跳地址（参数 = 授权页 URL，供「重新打开」）。
+    #: 主线程拿到文本后调 `submit_redirect()`；用户取消则调 `submit_redirect(None)`。
+    redirect_requested = Signal(str)
 
     def __init__(self, character_name: str | None = None, *, force_browser: bool = False, parent=None) -> None:
         super().__init__(parent)
@@ -395,6 +454,14 @@ class EsiSkillImportWorker(QThread):
         #: 少了这个开关，导完 A 之后 current 变成 A，再点就命中 A 的绑定静默刷 A，
         #: 用户永远没机会选 B（一账号多角色的常见场景）。
         self._force_browser = force_browser
+        #: 主线程交回的粘贴内容（None = 用户取消）；Event 置位表示已交回。
+        self._redirect_text: str | None = None
+        self._redirect_ready = threading.Event()
+
+    def submit_redirect(self, text: str | None) -> None:
+        """主线程调用：交回用户粘贴的回跳地址（None = 取消）。线程安全。"""
+        self._redirect_text = text
+        self._redirect_ready.set()
 
     # ── 线程体 ──
 
@@ -459,11 +526,16 @@ class EsiSkillImportWorker(QThread):
         `allow_browser=False` 时**不弹浏览器**，直接按授权失效报错：批量同步里
         一个角色掉线不该让用户连着走三次授权流程（每次最长等 10 分钟）。
         """
+        if not CLIENT_ID:
+            raise RuntimeError("曙光角色授权尚未启用：本版本还没有配置曙光 SSO 客户端 ID")
         name = character_name or self._character_name
         if name and not self._force_browser:
             row = load_token_row(name)
             if row:
+                # 刷新前也核对来源；误复制来的国际服 token 不得发送给曙光服务。
+                _check_claims(_jwt_claims(str(row.get("access_token") or "")), now_ts=0)
                 if self._still_valid(row.get("access_expires_at")) and row.get("access_token"):
+                    _check_claims(_jwt_claims(str(row["access_token"])))
                     return str(row["access_token"]), int(row["character_id"]), str(row["character_name"])
                 try:
                     return await self._refresh(client, row)
@@ -501,6 +573,7 @@ class EsiSkillImportWorker(QThread):
                 "grant_type": "refresh_token",
                 "refresh_token": str(row["refresh_token"]),
                 "client_id": CLIENT_ID,
+                "redirect_uri": CALLBACK_URL,  # 现有曙光工具刷新时同样带上（网易 SSO 的要求）
             },
         )
         return self._persist(
@@ -511,18 +584,17 @@ class EsiSkillImportWorker(QThread):
         )
 
     async def _browser_authorize(self, client) -> tuple[str, int, str]:
+        if not CLIENT_ID:
+            raise RuntimeError("曙光角色授权尚未启用：本版本还没有配置曙光 SSO 客户端 ID")
         verifier, challenge = _pkce_pair()
         state = secrets.token_urlsafe(16)
-        try:
-            server = _start_callback_server()
-        except OSError as e:
-            raise RuntimeError(f"回调端口 {CALLBACK_PORT} 被占用，请关掉占用它的程序后重试") from e
-        try:
-            webbrowser.open(_authorize_url(challenge, state, self._extra_scopes()))
-            code = self._await_code(server, state)
-        finally:
-            # 无条件关掉：否则端口 8721 会一直泄漏到进程结束
-            server.server_close()
+        device_id = await _fetch_device_id(client.session)
+        url = _authorize_url(challenge, state, self._extra_scopes(), device_id=device_id)
+        self._redirect_ready.clear()
+        self._redirect_text = None
+        webbrowser.open(url)
+        self.redirect_requested.emit(url)
+        code = parse_redirect(self._await_redirect(), state)
         try:
             payload = await _post_token(
                 client,
@@ -531,29 +603,25 @@ class EsiSkillImportWorker(QThread):
                     "code": code,
                     "client_id": CLIENT_ID,
                     "code_verifier": verifier,
+                    # 网易换令牌要求带回调地址（与授权请求里的完全一致）
+                    "redirect_uri": CALLBACK_URL,
                 },
             )
         except _TokenError as e:
             raise RuntimeError(f"换取令牌失败：{e}") from e
         return self._persist(payload)
 
-    def _await_code(self, server: _CallbackServer, state: str) -> str:
+    def _await_redirect(self) -> str:
+        """阻塞等主线程交回粘贴内容；0.5s 一查中断（`detach_worker` 只等 500ms）。"""
         deadline = time.monotonic() + _AUTH_TIMEOUT_S
-        while server.pending is None:
+        while not self._redirect_ready.wait(0.5):
             if self.isInterruptionRequested():
                 raise _Interrupted()
             if time.monotonic() > deadline:
-                raise RuntimeError(f"授权超时（{_AUTH_TIMEOUT_S} 秒内没收到回调），请重试")
-            server.handle_request()  # 自带 0.5s 超时，不会长阻塞
-        got = server.pending
-        if got.get("error"):
-            raise RuntimeError(f"授权被拒绝：{got.get('error_description') or got['error']}")
-        if got.get("state") != state:
-            raise RuntimeError("回调 state 不匹配，已中止（防止 CSRF）")
-        code = got.get("code")
-        if not code:
-            raise RuntimeError("回调里没有授权码")
-        return str(code)
+                raise RuntimeError(f"授权超时（{_AUTH_TIMEOUT_S} 秒内没有粘贴回跳地址），请重试")
+        if self._redirect_text is None:
+            raise _Interrupted()  # 用户在粘贴框点了取消：不算错误
+        return self._redirect_text
 
     def _persist(
         self,
@@ -571,7 +639,9 @@ class EsiSkillImportWorker(QThread):
         if not refresh:
             raise RuntimeError("token 端点没有返回 refresh_token，无法保存授权")
         expires_at = _utc_after(int(payload.get("expires_in") or _DEFAULT_EXPIRES_IN))
-        char_id, char_name = _character_from_claims(_jwt_claims(access), fallback_id, fallback_name)
+        claims = _jwt_claims(access)
+        _check_claims(claims)
+        char_id, char_name = _character_from_claims(claims, fallback_id, fallback_name)
         save_token_row(char_id, char_name, refresh, access, expires_at)
         return access, char_id, char_name
 
@@ -580,10 +650,10 @@ class EsiSkillImportWorker(QThread):
     async def _pull(self, client, access: str, char_id: int, char_name: str) -> dict:
         from core.char_settings_common import apply_skill_queue_finished
 
-        base = f"{ESI_BASE}/characters/{char_id}"
-        skills_raw = await _get_json(client, f"{base}/skills/", access) or {}
-        queue_raw = await _get_json(client, f"{base}/skillqueue/", access) or []
-        implants_raw = await _get_json(client, f"{base}/implants/", access) or []
+        base = f"/characters/{char_id}"
+        skills_raw = await _get_json(client, esi_url(f"{base}/skills/"), access) or {}
+        queue_raw = await _get_json(client, esi_url(f"{base}/skillqueue/"), access) or []
+        implants_raw = await _get_json(client, esi_url(f"{base}/implants/"), access) or []
 
         levels: dict[int, int] = {}
         for entry in skills_raw.get("skills", []) if isinstance(skills_raw, dict) else []:

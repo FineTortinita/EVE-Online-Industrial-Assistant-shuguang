@@ -375,7 +375,16 @@ def test_add_from_esi_always_opens_browser(qapp, monkeypatch, force_browser, exp
 
     所以「+ 从 ESI」必须强制走浏览器；只有「刷新技能」才允许静默刷新已有绑定。
     """
+    import base64
+    import json
+
     calls: list[str] = []
+    monkeypatch.setattr(esw, "CLIENT_ID", "test-client")
+    # 静默刷新前会核对旧令牌来源（不是曙光签发 / 不属于本应用 → 拒绝发送），
+    # 所以这里给一个 claims 合法的已过期曙光令牌，而不是随便一个字符串。
+    claims = {"iss": esw.SSO_ISSUER, "exp": 1, "azp": "test-client", "sub": "CHARACTER:EVE:1", "name": "甲"}
+    payload = base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip("=")
+    old_token = f"h.{payload}.s"
     # 过期时间戳 → 绑定存在但需要刷新，这样两条分支才都走得到
     monkeypatch.setattr(
         esw,
@@ -384,7 +393,7 @@ def test_add_from_esi_always_opens_browser(qapp, monkeypatch, force_browser, exp
             "character_id": 1,
             "character_name": name,
             "refresh_token": "r",
-            "access_token": "old",
+            "access_token": old_token,
             "access_expires_at": "2000-01-01T00:00:00Z",
         },
     )
@@ -421,6 +430,61 @@ def test_reauthorize_requests_corp_wallet_scope_only_when_enabled(qapp, monkeypa
 
     monkeypatch.setattr("services.user_settings.get_include_corp_wallet", lambda: False)
     assert worker._extra_scopes() == ()
+
+
+@pytest.mark.parametrize("pasted", ["ok", None], ids=["submitted", "cancelled"])
+def test_browser_authorize_waits_for_pasted_redirect(harness, monkeypatch, qtbot, pasted):
+    """端到端：worker 打开授权页 → 发信号 → 主线程弹框取粘贴内容 → 交回 worker。
+
+    守两件事：
+    1. 换令牌请求带上**本次** code、PKCE verifier 与网易要求的 redirect_uri；
+    2. 用户取消时 worker 静默退出（不弹失败框），桥自己解除忙碌态 —— 否则按钮永远灰着。
+    """
+    opened: list[str] = []
+    posted: list[dict] = []
+    monkeypatch.setattr(esw.webbrowser, "open", opened.append)
+
+    def fake_get_text(parent, title, label, text=""):
+        if pasted is None:
+            return "", False
+        from urllib.parse import parse_qs, urlparse
+
+        inner = parse_qs(urlparse(opened[-1]).query)["returnUrl"][0]
+        state = parse_qs(urlparse(inner).query)["state"][0]
+        return f"{esw.CALLBACK_URL}?code=the-code&state={state}", True
+
+    async def fake_device(session):
+        return "dev-1"
+
+    monkeypatch.setattr(esw, "_fetch_device_id", fake_device)
+
+    monkeypatch.setattr(csb.InputQmlDialog, "get_text", staticmethod(fake_get_text))
+
+    async def fake_post(client, data):
+        posted.append(data)
+        return {"access_token": "a", "refresh_token": "r"}
+
+    monkeypatch.setattr(esw, "_post_token", fake_post)
+    monkeypatch.setattr(esw.EsiSkillImportWorker, "_persist", lambda self, payload: ("a", 1, "甲"))
+
+    async def fake_import(self):
+        await self._browser_authorize(SimpleNamespace(session=None))
+        return dict(_ESI_PAYLOAD)
+
+    monkeypatch.setattr(csb.EsiSkillImportWorker, "_import", fake_import)
+    bridge = harness.bridge
+    bridge.addCharacterFromEsi()
+    qtbot.waitUntil(lambda: not bridge.esiBusy, timeout=5000)
+
+    assert opened and "device_id%3Ddev-1" in opened[0], "授权地址必须带网易设备 ID"
+    if pasted is None:
+        assert posted == [] and bridge.esiStatus == "已取消授权"
+        assert harness.box.informed == [], "取消不是失败，也不是成功"
+    else:
+        (data,) = posted
+        assert data["code"] == "the-code" and data["redirect_uri"] == esw.CALLBACK_URL
+        assert data["grant_type"] == "authorization_code" and data["code_verifier"]
+        assert harness.box.informed[0][0] == "从 ESI 导入完成"
 
 
 def test_skills_config_hint_only_when_nothing_configured(harness):
