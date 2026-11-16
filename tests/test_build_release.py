@@ -28,7 +28,7 @@ def _make_src(tmp_path: Path) -> Path:
     (tmp_path / "data" / "caches").mkdir()
     (tmp_path / "README.md").write_text("readme", encoding="utf-8")
     (tmp_path / "dist").mkdir()
-    (tmp_path / "dist" / "EVE商人助手.exe").write_bytes(b"exe")
+    (tmp_path / "dist" / "EVE商人助手-曙光.exe").write_bytes(b"exe")
     return tmp_path
 
 
@@ -53,7 +53,7 @@ def test_organize_release_copies_whitelist_only(tmp_path, monkeypatch):
         "mfg_browser_settings.json",
         "terminology.json",
     ]
-    assert (release / "EVE商人助手.exe").exists()
+    assert (release / "EVE商人助手-曙光.exe").exists()
     assert (release / "README.md").exists()
 
 

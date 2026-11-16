@@ -6,8 +6,8 @@ build_release.py — EVE 商人助手 发行版打包脚本
     python build_release.py --skip-zip   # 仅打包 exe，不压缩 ZIP
 
 输出：
-    dist/EVE商人助手/          # 目录结构
-    dist/EVE商人助手_v{version}.zip   # ZIP 发行包
+    dist/EVE商人助手-曙光/          # 目录结构
+    dist/EVE商人助手-曙光_v{version}.zip   # ZIP 发行包
 """
 
 import os
@@ -24,8 +24,8 @@ from core.version import __version__ as VERSION
 # ── 路径 ──
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 DIST_DIR = os.path.join(PROJECT_ROOT, "dist")
-BUILD_EXE_DIR = os.path.join(DIST_DIR, "EVE商人助手")  # PyInstaller 默认输出
-RELEASE_DIR = os.path.join(DIST_DIR, "EVE商人助手_v" + VERSION)
+BUILD_EXE_DIR = os.path.join(DIST_DIR, "EVE商人助手-曙光")  # PyInstaller 默认输出
+RELEASE_DIR = os.path.join(DIST_DIR, "EVE商人助手-曙光_v" + VERSION)
 
 
 def step(msg: str):
@@ -150,7 +150,7 @@ def run_pyinstaller():
             "--icon",
             os.path.join(PROJECT_ROOT, "ui_qml", "assets", "app.ico"),
             "--name",
-            "EVE商人助手",
+            "EVE商人助手-曙光",
             entry_path,
             "--distpath",
             DIST_DIR,
@@ -191,8 +191,8 @@ def organize_release():
     步骤 2：整理发行版目录
 
     最终结构：
-        dist/EVE商人助手_v{version}/
-            EVE商人助手.exe
+        dist/EVE商人助手-曙光_v{version}/
+            EVE商人助手-曙光.exe
             database/
                 reference.db    ← 无头初始化预生成：python Main.py --init-only
                 blueprint.db
@@ -213,8 +213,8 @@ def organize_release():
 
     # 1. 复制 exe（PyInstaller 无 COLLECT 时直接输出到 dist/ 目录）
     exe_src_candidates = [
-        os.path.join(BUILD_EXE_DIR, "EVE商人助手.exe"),  # 有 COLLECT 时
-        os.path.join(DIST_DIR, "EVE商人助手.exe"),  # 无 COLLECT 时
+        os.path.join(BUILD_EXE_DIR, "EVE商人助手-曙光.exe"),  # 有 COLLECT 时
+        os.path.join(DIST_DIR, "EVE商人助手-曙光.exe"),  # 无 COLLECT 时
     ]
     exe_src = None
     for candidate in exe_src_candidates:
@@ -224,7 +224,7 @@ def organize_release():
     if not exe_src:
         log.error(f"❌ exe 文件未找到（查找路径: {exe_src_candidates}）")
         sys.exit(1)
-    exe_dst = os.path.join(RELEASE_DIR, "EVE商人助手.exe")
+    exe_dst = os.path.join(RELEASE_DIR, "EVE商人助手-曙光.exe")
     shutil.copy2(exe_src, exe_dst)
     step(f"   ✓ 复制 {exe_src} → {exe_dst}")
 
@@ -269,7 +269,7 @@ def create_zip():
     """步骤 3：创建 ZIP 压缩包"""
     step("🔄 创建 ZIP 压缩包...")
 
-    zip_name = f"EVE商人助手_v{VERSION}.zip"
+    zip_name = f"EVE商人助手-曙光_v{VERSION}.zip"
     zip_path = os.path.join(DIST_DIR, zip_name)
 
     # 如果存在则删除旧 ZIP
@@ -282,7 +282,7 @@ def create_zip():
                 file_path = os.path.join(root, file)
                 # 在 zip 中的路径：相对于 RELEASE_DIR 的路径
                 arcname = os.path.relpath(file_path, RELEASE_DIR)
-                # 保持 EVE商人助手_v{version}/xxx 的目录结构
+                # 保持 EVE商人助手-曙光_v{version}/xxx 的目录结构
                 arcname = os.path.join(os.path.basename(RELEASE_DIR), arcname)
                 zf.write(file_path, arcname)
 
@@ -298,7 +298,7 @@ def clean_build_artifacts():
     if os.path.exists(build_dir):
         shutil.rmtree(build_dir)
         step("   ✓ 删除 build/ 目录")
-    # PyInstaller 生成的 dist/EVE商人助手/（非 Release 目录）
+    # PyInstaller 生成的 dist/EVE商人助手-曙光/（非 Release 目录）
     if os.path.exists(BUILD_EXE_DIR):
         shutil.rmtree(BUILD_EXE_DIR)
         step(f"   ✓ 删除 {BUILD_EXE_DIR}")
@@ -308,7 +308,7 @@ def verify_packages_in_build(packages: list[str]):
     """构建后验证：检查 PyInstaller build 目录中是否收集了所有本地包的 .pyc"""
     step("🔍 验证构建完整性...")
     build_dir = os.path.join(PROJECT_ROOT, "build")
-    pyc_dir = os.path.join(build_dir, "EVE商人助手", "localpycs")
+    pyc_dir = os.path.join(build_dir, "EVE商人助手-曙光", "localpycs")
     if not os.path.isdir(pyc_dir):
         # onefile 模式可能没有 localpycs 目录，跳过验证
         step("   ⏭ onefile 模式跳过 .pyc 目录验证")
@@ -355,7 +355,7 @@ def main():
     log.info("\n" + "=" * 50)
     log.info("  🎉 打包完成！")
     if not skip_zip:
-        zip_path = os.path.join(DIST_DIR, f"EVE商人助手_v{VERSION}.zip")
+        zip_path = os.path.join(DIST_DIR, f"EVE商人助手-曙光_v{VERSION}.zip")
         log.info(f"  发行包: {zip_path}")
     log.info(f"  目录:   {RELEASE_DIR}/")
     log.info("=" * 50)

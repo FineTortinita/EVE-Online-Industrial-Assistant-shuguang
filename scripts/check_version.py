@@ -42,7 +42,8 @@ sys.stderr.reconfigure(errors="replace")  # type: ignore[union-attr]
 # CHANGELOG 最新版本段：`<!-- version list -->` 之后第一个 `## vX.Y.Z (date)` 标题
 _VERSION_HEADING_RE = re.compile(r"^##\s+v?(\d+\.\d+\.\d+)\b", re.MULTILINE)
 _VERSION_FILE_RE = re.compile(r'^__version__\s*=\s*["\']([^"\']+)["\']', re.MULTILINE)
-_TAG_RE = re.compile(r"^v?(\d+\.\d+\.\d+)$")
+#: 曙光分支 tag 为 `shuguang-vX.Y.Z`；仍接受上游 `vX.Y.Z`（合并上游历史时 HEAD 可能落在它们上）
+_TAG_RE = re.compile(r"^(?:shuguang-)?v?(\d+\.\d+\.\d+)$")
 
 
 def _read_version_file() -> str:
