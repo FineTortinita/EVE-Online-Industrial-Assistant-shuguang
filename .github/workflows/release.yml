@@ -67,7 +67,7 @@ jobs:
           TAG="shuguang-v$VER"
         fi
         BODY=""
-        if gh release view "$TAG" --json assets -q '.assets[].name' 2>/dev/null | grep -q '^EVE商人助手-曙光_v.*\.zip$'; then
+        if gh release view "$TAG" --json assets -q '.assets[].name' 2>/dev/null | grep -q '\.zip$'; then
           NEEDED=false                     # 该版本 Release 已带安装包 → 不重复打包（省 CI，也避免同名资产冲突）
         else
           NEEDED=true

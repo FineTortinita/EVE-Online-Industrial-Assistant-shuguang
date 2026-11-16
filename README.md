@@ -7,7 +7,7 @@
 > 下文功能介绍沿用上游，截图与贸易中心名为国际服示例。
 
 > 🧪 **公开测试版**：到 [Releases](https://github.com/FineTortinita/EVE-Online-Industrial-Assistant-shuguang/releases)
-> 下载 `EVE商人助手-曙光_v*.zip`（标记为 Pre-release 的版本），整个目录解压后双击 exe。
+> 下载最新 `shuguang-v*` 版本（标记为 Pre-release）里的 zip 安装包，整个目录解压后双击 exe。
 > 测试期间请注意：
 > - 制造配方、精炼产物、星门跳数取自曙光客户端缓存与曙光 ESI，**尚未与游戏内窗口逐条核对**，
 >   下单前请在游戏里复核关键数字；发现对不上请在 [Issues](https://github.com/FineTortinita/EVE-Online-Industrial-Assistant-shuguang/issues) 附截图反馈。
