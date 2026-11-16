@@ -1,8 +1,7 @@
 """物流距离计算测试 —— 星门图 BFS 与贸易中心跳数
 
 `get_distance_jumps` 自 2026-09-20 起改为走 `reference.db.stargate` 的**真实星门图**
-（原先是一张硬编码表，多处与实测不符：Amarr↔Dodixie 标 62、真值高安 34；Amarr↔Rens
-标 60、真值 20；Jita↔Amarr 标 72、真值 45）。
+（原先是一张硬编码表）。曙光分支的 reference.db 由曙光快照导入，期望值见 `HUB_JUMPS` 注释。
 
 **必须用真实数据库**：本文件的全部意义就是「BFS 在真图上给出的跳数与游戏一致」，
 桩上比对测不出星门图那个反直觉的 join（`destination_system_id` 存的是星门 id 而非星系 id）。
@@ -32,19 +31,22 @@ _AMARR = TRADE_HUB_SYSTEM_IDS["Amarr"]
 
 # ── 参数化数据集 ──
 
-#: `(起点, 终点, 最短, 高安)` —— 全部经游戏内跳数核对（2026-09-20）。
-#: 两者差距最大的是 Jita↔Amarr：最短 11 跳走 Ahbazon 低安捷径，高安要绕 45 跳。
+#: `(起点, 终点, 最短, 高安)` —— **曙光**星门图（曙光 ESI 逐个 `/universe/stargates/{id}/` 导出，
+#: 快照 build 3684550，10,837 个星门）上 BFS 推出的值，**未经游戏内核对**（2026-11-16）。
+#: 曙光 ESI 的 `/route/` 对任意星系都返回 404，没法拿官方路线接口交叉验证。
+#: 与国际服差异很大（国际服 Jita↔Amarr 是 11/45）：曙光的 Dodixie 有 8 个星门，比国际服多出直连
+#: Sobaseki、Penirgman 的两条，把 The Forge / Domain / Sinq Laison 之间的高安路线大幅缩短。
 HUB_JUMPS = [
-    ("Jita", "Amarr", 11, 45),
-    ("Jita", "Dodixie", 12, 15),
-    ("Jita", "Rens", 15, 25),
-    ("Jita", "Hek", 9, 19),
-    ("Amarr", "Dodixie", 14, 34),
-    ("Amarr", "Rens", 11, 20),
-    ("Amarr", "Hek", 15, 26),
-    ("Dodixie", "Rens", 10, 14),
-    ("Dodixie", "Hek", 8, 8),
-    ("Rens", "Hek", 6, 6),
+    ("Jita", "Amarr", 11, 11),
+    ("Jita", "Dodixie", 8, 8),
+    ("Jita", "Rens", 7, 7),
+    ("Jita", "Hek", 6, 6),
+    ("Amarr", "Dodixie", 3, 3),
+    ("Amarr", "Rens", 7, 7),
+    ("Amarr", "Hek", 15, 16),
+    ("Dodixie", "Rens", 6, 6),
+    ("Dodixie", "Hek", 12, 13),
+    ("Rens", "Hek", 11, 13),
 ]
 
 UNKNOWN_PAIRS = [

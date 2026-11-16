@@ -249,6 +249,8 @@ _LEGACY_SKILL_KEYS: dict[str, str] = {
     # 「量产技术」与「批量生产学」在 SDE 里是同一个技能（Mass Production），
     # 前者是不存在的旧名；「高级量产技术」是 Advanced Mass Production 的正确名，勿动。
     "量产技术": MASS_PRODUCTION,
+    # 曙光译名（77725 Advanced Capital Ship Construction）；面板旧键沿用了国际服简体译名
+    "高级旗舰建造": "高级旗舰建造研究",
 }
 
 

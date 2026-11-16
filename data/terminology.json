@@ -155,7 +155,14 @@
     "Refinery Management": "精炼厂管理",
     "Chief Science Officer": "首席科研官培训",
     "Station Management": "空间站管理学",
-    "Neurotoxin Control": "神经毒化控制理论"
+    "Neurotoxin Control": "神经毒化控制理论",
+    "Precursor Weapon Rigging": "先驱者武器改装技术",
+    "Guristas Modified Engineering": "古斯塔斯改造技术研究",
+    "Angel Modified Engineering": "天使改造技术研究",
+    "Serpentis Modified Engineering": "天蛇改造技术研究",
+    "Bloodraider Modified Engineering": "血袭者改造技术研究",
+    "Mech Drone Studies": "机甲型无人机研究",
+    "Ancient Drone Studies": "远古无人机研究"
   },
   "system_names": {
     "Jita": "吉他",

@@ -123,8 +123,9 @@ def compute_jumps(
     """两个星系之间的跳跃数；不可达返回 None。
 
     口径：
-      - `"shortest"` —— 纯最短路（可能穿低安，例如 Jita→Amarr 只要 11 跳）
-      - `"highsec"`  —— 只走安全等级 ≥ `HIGHSEC_MIN_SECURITY` 的中间星系与终点（45 跳）
+      - `"shortest"` —— 纯最短路（可能穿低安）
+      - `"highsec"`  —— 只走安全等级 ≥ `HIGHSEC_MIN_SECURITY` 的中间星系与终点
+        （国际服 Jita→Amarr 11 / 45 跳；曙光星门图 11 / 11，见 tests/test_logistics_distance.py）
       - `"custom"`   —— 只走安全等级 ≥ `min_security` 的星系
 
     起点星系不参与安全过滤（合同从哪儿发是既成事实）。
