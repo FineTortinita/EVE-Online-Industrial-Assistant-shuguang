@@ -132,6 +132,16 @@ def resolve_system_names_batch(conn: sqlite3.Connection, solar_system_ids: list[
 
 定义行：`270`
 
+### `hub_options`
+
+```python
+def hub_options(hubs: list[str]) -> list[dict]
+```
+
+贸易中心下拉项：显示中文（术语表），值保持英文 hub 键供取价使用。
+
+定义行：`291`
+
 ### `resolve_system_display_names_batch`
 
 ```python
@@ -140,7 +150,7 @@ def resolve_system_display_names_batch(solar_system_ids: list[int]) -> dict[int,
 
 批量查询星系显示名；异常返回空 dict。
 
-定义行：`291`
+定义行：`296`
 
 ### `resolve_stations`
 
@@ -150,7 +160,7 @@ def resolve_stations(conn: sqlite3.Connection, location_ids: set[int]) -> dict[i
 
 location_id → (空间站名, 星系名)。NPC 空间站的 location_id 即 `station.station_id`。
 
-定义行：`316`
+定义行：`321`
 
 ### `resolve_stations_by_ids`
 
@@ -160,4 +170,4 @@ def resolve_stations_by_ids(location_ids: set[int]) -> dict[int, tuple[str, str]
 
 打开 reference.db 并解析空间站名称（订单地点列兜底）。
 
-定义行：`331`
+定义行：`336`

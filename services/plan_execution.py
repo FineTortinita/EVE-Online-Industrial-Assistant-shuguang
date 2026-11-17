@@ -236,7 +236,7 @@ def _active_plans_for_material_check() -> list[dict]:
         return [
             dict(r)
             for r in conn.execute(
-                "SELECT status, sub_level, product_type_id, runs, parallels FROM production_plans "
+                "SELECT status, sub_level, product_type_id, runs, parallels, activity FROM production_plans "
                 f"WHERE status NOT IN ({_placeholders(PLAN_TERMINAL_STATUSES)})",
                 PLAN_TERMINAL_STATUSES,
             )
@@ -273,7 +273,8 @@ def _pending_children_output_by_type(all_plans: list[dict]) -> dict[int, int]:
             parallels = max(int(p.get("parallels") or 1), 1)
             if runs <= 0:
                 continue
-            bp = _find_blueprint_for_product(conn, int(p["product_type_id"]), "manufacturing")
+            act = "reaction" if (p.get("activity") or "") == "reaction" else "manufacturing"
+            bp = _find_blueprint_for_product(conn, int(p["product_type_id"]), act)
             per_run = max(int(bp[1] or 1), 1) if bp else 1
             tid = int(p["product_type_id"])
             out[tid] = out.get(tid, 0) + runs * parallels * per_run

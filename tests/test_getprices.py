@@ -427,7 +427,7 @@ class TestSavePrices:
 
 
 class TestFetchBaselineOnly:
-    """fetch_baseline_only — 仅拉 /markets/prices/ 基准价写入 5 个贸易区域"""
+    """fetch_baseline_only — 仅拉 /markets/prices/ 基准价写入全部贸易区域"""
 
     @pytest.mark.asyncio
     async def test_writes_baseline_to_all_trade_regions(self):
@@ -445,7 +445,7 @@ class TestFetchBaselineOnly:
             await fetch_baseline_only(progress_cb=lambda pct, msg: None)
 
         expected_regions = [rid for _, rid in TRADE_REGIONS]
-        assert len(expected_regions) == 5, "应有 5 个贸易区域"
+        assert len(expected_regions) == 6, "应有 6 个贸易区域（含索巴色基）"
         mock_save.assert_awaited_once()
         _args, _kwargs = mock_save.await_args
         # save_prices(baseline, {rid: baseline for all}, region_ids) — region_ids 为第 3 位置参数

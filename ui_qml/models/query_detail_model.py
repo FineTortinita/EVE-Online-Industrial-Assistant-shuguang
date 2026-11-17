@@ -233,7 +233,27 @@ def refine_total_rows(result: Mapping[str, Any]) -> list[dict]:
         return []
     output_value = _num(result.get("total_output_value"))
     profit = _num(result.get("total_profit"))
-    return [
+    rows = [
         {"label": "产出", "valueText": f"{output_value:,.2f}", "token": ""},
         {"label": "利润", "valueText": f"{profit:+,.2f}", "token": "ACCENT_GREEN" if profit >= 0 else "ACCENT_RED"},
     ]
+    # 每方化矿：按货舱容积比较矿种（只在算得出体积时显示）
+    per_m3 = result.get("value_per_m3")
+    if per_m3 is not None:
+        rows.append({"label": "每方", "valueText": f"{_num(per_m3):,.2f}", "token": ""})
+    return rows
+
+
+def refine_batch_note(result: Mapping[str, Any]) -> str:
+    """批量说明：配方按批计算，不足一批的余量不精炼（BL-050）。无批量概念（=1）时返回空串。"""
+    notes = []
+    for item in (result or {}).get("items") or []:
+        portion = int(_num(item.get("portion_size")) or 1)
+        if portion <= 1:
+            continue
+        text = f"每 {portion:,} 单位一批，共 {int(_num(item.get('batches'))):,} 批"
+        leftover = int(_num(item.get("leftover")))
+        if leftover:
+            text += f"，余 {leftover:,} 单位不精炼"
+        notes.append(text)
+    return "；".join(notes)

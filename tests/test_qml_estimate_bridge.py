@@ -79,22 +79,20 @@ def test_constants_match_widgets_version(qapp):
     assert b.refineMode == "空间站"
 
 
-def test_hub_options_cover_all_trade_hubs(qapp, monkeypatch):
-    """贸易中心下拉：五个中心全覆盖，且 `value` 是取价用的英文键、`label` 走术语表中英对照。
+def test_hub_options_cover_all_trade_hubs(qapp):
+    """贸易中心下拉全覆盖，值保留英文键，标签只显示术语表中文。
 
     回归：这里早先是「卖价 / 买价 / 均价」的价格类型下拉，与底部两个「…到剪贴板」
     按钮重复；改成中心下拉后买/卖由底部按钮承担。
     """
-    import ui_qml.bridge.estimate_bridge as eb
     from core.constants import TRADE_HUB_IDS
 
-    monkeypatch.setattr(eb, "resolve_system_display_names_batch", lambda ids: {30000142: "吉他 (Jita)"})
     options = EstimateBridge().hubOptions()
 
     assert [o["value"] for o in options] == list(TRADE_HUB_IDS)
-    assert options[0] == {"label": "吉他 (Jita)", "value": "Jita"}
-    # 术语表里没有的中心退回英文键，不能给空串（空串会让下拉显示成空白项）
-    assert all(o["label"] for o in options)
+    assert options[0] == {"label": "索巴色基", "value": "Sobaseki"}
+    assert next(o["label"] for o in options if o["value"] == "Jita") == "吉他"
+    assert all(o["label"] and o["value"] not in o["label"] for o in options)
 
 
 def test_character_defaults_to_config_current(qapp, monkeypatch):

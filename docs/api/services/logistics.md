@@ -35,7 +35,7 @@ def _load_gate_graph() -> tuple[dict[int, set[int]], dict[int, float]]
 
 从 reference.db 建星系邻接表 + 安全等级表。
 
-定义行：`70`
+定义行：`77`
 
 ### `compute_jumps`
 
@@ -45,7 +45,7 @@ def compute_jumps(origin_system_id: int, destination_system_id: int, mode: str='
 
 两个星系之间的跳跃数；不可达返回 None。
 
-定义行：`117`
+定义行：`124`
 
 ### `get_distance_jumps`
 
@@ -55,7 +55,7 @@ def get_distance_jumps(source: str, destination: str) -> int | None
 
 两个**贸易中心**之间的跳跃数（按高安路线 —— 跑货实际会飞的那条）。
 
-定义行：`174`
+定义行：`182`
 
 ### `list_trade_hub_distances`
 
@@ -65,4 +65,4 @@ def list_trade_hub_distances() -> list[dict]
 
 返回所有贸易中心对的跳跃距离（走高安路线），供 UI 使用。
 
-定义行：`188`
+定义行：`196`

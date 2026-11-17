@@ -115,3 +115,39 @@ def load_implants() -> list[dict]:
         conn.close()
     IMPLANT_CACHE = results
     return results
+
+
+#: {植入体 type_id: 制造时间加成 %}（属性 440，-4 = −4%）；按需从 item_dogma 读，进程内缓存。
+_MFG_TIME_BONUS_CACHE: dict[int, float] = {}
+
+
+def manufacturing_time_bonuses(implant_ids: list | None) -> list[float]:
+    """人物配置里的植入体 → 各自的制造时间加成百分比列表（无此属性 / 查不到的不计）。
+
+    供评分把「BX-80x 系列」这类制造时间植入体乘进生产时间（BL-052-5）；
+    纯乘数换算在 `domain.formulas.implant_time_multiplier`。
+    """
+    from domain.formulas import IMPLANT_MANUFACTURING_TIME_ATTR
+
+    ids = [int(i) for i in (implant_ids or []) if i]
+    missing = [i for i in ids if i not in _MFG_TIME_BONUS_CACHE]
+    if missing:
+        conn = get_container().db.direct_connect("ref")
+        try:
+            ph = ",".join("?" * len(missing))
+            rows = conn.execute(
+                f"SELECT type_id, dogma_attrs FROM item_dogma WHERE type_id IN ({ph})", missing
+            ).fetchall()
+        except sqlite3.OperationalError:
+            # 吞的是「item_dogma 表未建」（初始化未完成）：本次按无植入体加成，不缓存
+            log.warning("植入体数据表不存在，制造时间不计植入体加成")
+            return []
+        finally:
+            conn.close()
+        found = {int(r[0]): r[1] for r in rows}
+        for i in missing:
+            attrs = json.loads(found[i]) if found.get(i) else []
+            _MFG_TIME_BONUS_CACHE[i] = next(
+                (float(a["value"]) for a in attrs if a.get("attribute_id") == IMPLANT_MANUFACTURING_TIME_ATTR), 0.0
+            )
+    return [_MFG_TIME_BONUS_CACHE[i] for i in ids if _MFG_TIME_BONUS_CACHE.get(i)]

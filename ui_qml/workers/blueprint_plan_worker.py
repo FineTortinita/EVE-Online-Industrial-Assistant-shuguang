@@ -19,8 +19,8 @@ class _BulkPlanMetricsWorker(QThread):
         # 价格来源设置（材料/成品 hub）替代硬编码 "Jita"，与单条添加流程口径一致
         settings = user_settings.load_settings()
         price_settings = settings.get("price_settings") or {}
-        mat_hub = price_settings.get("mat_hub", "Jita")
-        sell_hub = price_settings.get("prod_hub", "Jita")
+        mat_hub = price_settings.get("mat_hub", "Sobaseki")
+        sell_hub = price_settings.get("prod_hub", "Sobaseki")
         mat_mult = float(price_settings.get("mat_mult") or 1.0)
         prod_mult = float(price_settings.get("prod_mult") or 1.0)
         # 产出机库默认（机库设置里配置）→ 写入计划，下线时自动入库

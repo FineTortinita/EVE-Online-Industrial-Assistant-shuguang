@@ -32,7 +32,7 @@ class ScoreW(BaseBatchScoreWorker):
         """ScoreW 自定义 run：预加载市场数据，迭代 _calc_item 并 emit done(list)"""
         total = len(self._items)
         # 批量预加载所有物品的市场价和成交量（一次查询代替 N 次）
-        hub = self._cfg.get("hub", "Jita") if self._mfg else self._cfg.get("sh", "Jita")
+        hub = self._cfg.get("hub", "Sobaseki") if self._mfg else self._cfg.get("sh", "Sobaseki")
         mkt_id = TRADE_HUB_IDS.get(hub, 10000002)
         self._batch_market: dict[int, dict[str, float | int | None]] = {}
         try:

@@ -13,6 +13,97 @@
 
 ---
 
+## BL-052 工业计算口径偏差（重构阶段 1，见 `docs/dev/industry-refactor-plan.md`）
+
+- 状态：fixed（2026-11-17，工作区待提交，待用户复核）
+- 证据（真实读到的 `文件:行号`）：
+  1. 计划侧没乘建筑 + 改装件材料加成：`services/plan_rebuild.py:300,321`、`services/plan_decompose.py:118`、
+     `services/plan_aggregator.py:661` 调 `calc_material_for_runs` 时 `structure_mat_saving` 走默认 1.0；
+     而评分 / 启动闸门（`services/scoring_service.py:606` → `domain/scoring.py`）乘了 → 同一计划子项流程 / 采购量与启动闸门两套数。
+     真实库机库 1 是莱塔卢（`facility_type='raitaru'`，材料 ×0.99），这两套数在用户数据上已经分叉。
+  2. 改装件无安等系数：`services/hangar_industry_config.py:318,351` 直接 `Π(1+bonus/100)`；游戏里高安 ×1.0 / 低安 ×1.9 / 00·虫洞 ×2.1。
+  3. 反应安装费用旧口径 `0.05 × 收入 × 指数 × (1−建筑) × (1+税)`（`domain/scoring.py:469-470`），不走 EIV、不含 SCC 4%；
+     反应时间不吃建筑时间加成；`STRUCTURE_BASE`（`services/hangar_industry_config.py:31`）无阿塔诺 / 塔塔拉，反应改装件组 1933-1939 未导入。
+  4. 材料取整 `ceil(x − 1e-10)`（`domain/formulas.py:141`）而游戏是 `ceil(round(x, 2))`：x=100.004 时游戏 100、本应用 101。
+  5. 植入体已导入人物配置（`data/char_config.json` 的 `implants`，例 27171 = 制造时间 −4%）但时间计算不读（`domain/formulas.py:254`）。
+- 不在本条：反应计划进采购 —— 计划系统目前根本不建反应计划（`production_plans` 真实库 13 行全是 manufacturing），属阶段 2「引擎 + 反应轨」新功能。
+  `services/bom_expander.py:213`（查询页 BOM，无机库语境）同样留阶段 2 由统一引擎接管。
+- 修复中另查出：
+  6. `compute_child_forest` 展开中间件下级时只按**一条线**的轮数（`node["runs"]` 是每条线的轮数），
+     并行 > 1 的中间件少算下级需求；母项侧却按 `runs × parallels` 整批算 —— 两处口径也不同。现统一为「逐线整批取整 × 并行」。
+- 修法：`domain/formulas.py` 游戏取整 `ceil(round(x,2))` + `max(runs, …)`、`security_band` / `rig_bonus_multiplier` /
+  `implant_time_multiplier`；`services/hangar_industry_config.py` 加阿塔诺 / 塔塔拉（只对反应生效）、反应改件组 1933-1939 与
+  配方类别匹配、改件按星系安等放大、新增 `manufacturing_mat_saving`（计划侧三处共用）；反应安装费改走 `calc_job_cost_fees`；
+  `getrigdata` 补拉反应改件（属性 2713/2714）。安等系数与塔塔拉 0.75 为曙光 ESI 2026-11-17 实测值。
+- 验证：新增回归 —— 取整 / 安等档位 / 植入体（参数化）、开明网乌鸦级金样例（流程 23/45/6、边角料 1/138，与开明网一致）、
+  安等 × 精炼建筑 × 活动 7 组参数化、反应费 EIV+SCC、子项按机库倍率 + 并行展开。
+- 阶段 2 收尾（同日）：D5 反应计划进待采购 / 填料总表（`plan_aggregator._plan_recipe`）与计划评分（`calculate_plan_metrics` 反应分支）；
+  D8 三套展开器收敛到 `domain/industry_calc.py`，`domain/bom.py` 删除。层级口径从「最浅出现」改为「最长路径」（T2 / 开明网同口径），
+  真实库 13 行计划（阿兹贝尔母项 + 12 子项）迁移前后 demand / runs / 子级逐行一致（库副本实测）。
+- 影响：已有计划在**莱塔卢**等工程建筑机库上的子项需求 / 采购量会略降（×0.99），与启动检查对齐；需打开机库设置重新拉取一次改件数据才会出现反应改件。
+
+## BL-051 市场监控篮子成员过少与指标数量不符
+
+- 状态：fixed（2026-11-17，本地验证通过，待用户复核）
+- 现场数据：market.db 中吉他区域 10000002 的 price_history 只有 2,203 行 / 26 种物品；索巴色基区域 10000016 有 436,071 行 / 3,014 种物品。
+- 定位：市场监控桥及服务默认固定 Jita，取错曙光主要市场的历史；成员列表另有前 20 条截断，卡片总数与实际合格样本数混用。
+- 已修复（2026-11-17，工作区待提交）：桥与指数服务默认区域改索巴色基；卡片显示「合格 / 本地篮子」，成员说明带权重日期；旧整页缓存失效；每页20条，提供上一页/下一页，切换篮子回第一页。
+- 验证：真实本地数据 MPI 8/8、PPPI 110/1013、SPPI 255/3414、CPI 1188/14433（合格/本地候选），分页分别1/6/13/60页，CPI最后页8条。原44条针对测试在区域默认改变后3条旧夹具失败，夹具改用DEFAULT_REGION_ID后失败项通过；桥分页与取数区域回归通过，真窗口快照确认索巴色基指数已显示。未达到流动性/历史覆盖门槛的候选仍不纳入指数，不能把候选总数当合格数。
+
+## BL-048 GitHub issue #1：蓝图导入、价格中心与列宽
+
+- 2026-11-17 用户复核：工业制造、市场贸易单列拖动只有整个表头的拖拽动画，列宽未变，且显示不全；要求去掉英文名称列。区域仍显示 Sobaseki/Jita 英文。先前「列宽已修复」的结论仅验证了仓库表，不能覆盖这两个页面，当时本条继续 open，按实际交互重新修复（见下一段）。
+- 本轮修复（2026-11-17，待用户复核）：生产计划表主动禁止拖宽产品列，其他列 DragHandler 与 HorizontalHeaderView 抢事件；贸易与可制造物品表没有接上列宽修改逻辑。三表改用 FColumnResizeHandle 独立鼠标抓取，产品列也可调宽，英文列隐藏但保留底层字段索引，补齐横向滚动条。
+- 交互验证：tests/test_qml_column_resize.py 三表真实鼠标拖动通过；同列连续拖两次宽度累计+150px、邻列不变、英文列无可见delegate；横滚后contentX增长，截图确认贸易购物车和可制造物品最右利润率列可见。
+- 中文显示补齐：外壳区域摘要/菜单、查询/详情/贸易/关注/比较/评分/可制造物品/机库/采购/审核/合同等可见选项统一取术语中文；内部英文键与索引不变。区域定向45例经失败项修正复跑通过，贸易默认/切换方向2例通过；真窗口确认摘要与查询选择器显示索巴色基。
+
+- 类型：缺陷
+- 状态：fixed（2026-11-17，待用户复核）
+- 来源：https://github.com/FineTortinita/EVE-Online-Industrial-Assistant-shuguang/issues/1
+- 证据：2026-11-17 读取附件 default.txt（sha256 `47d2ee14ecb6dbf5f3cec0d68be42acb3cd7e9385c478e16ce91550ff2a31740`），内容为机库列表（名称、数量、分类、体积），缺 ME/TE/流程数/原图类型；原解析把第 2–4 列转整数失败后静默跳过，因此提示 0 材料 / 0 未识别。
+- 结论：用户确认根因是 issue 提出者复制位置错误；蓝图应从游戏内制造页面导入，不支持机库列表导入。
+- 已修复（工作区待提交）：识别机库列表后提示「请从游戏内制造页面复制蓝图」，在读取现有蓝图、生成全量同步差异前退出，不入库。已撤回曾尝试的机库补属性导入（补丁备份：`../captures/withdrawn-inventory-import.patch`）。
+- 价格中心（工作区待提交）：曙光 ESI 实测三钛合金卖单 Lonetrek（10000016）28 笔全在 Sobaseki，The Forge 仅 9 笔（Jita 4 笔）。`TRADE_HUB_IDS` 首项改为 Sobaseki（星系 30001363），材料/成品、估价、查询、交易、可制造物品、评分对话框的默认中心随之改为索巴色基；`settings.json` v1→v2 迁移只把旧默认 `Jita` 改为 `Sobaseki`，用户选过的其它中心保留，并在价格更新区域里补上 Sobaseki。
+- 中文选项：工业页与仓库页的材料/成品中心下拉显示中文名、值仍用英文键取价（`services/name_resolver.hub_options`）。`data/terminology.json` 原写「索巴塞基」，按曙光 ESI `language=zh` 实测返回「索巴色基」更正。
+- 列宽：仓库页「机库管理」「蓝图管理」两张表新增表头右缘拖拽调宽（本次会话内有效）；生产规划表原本已支持拖拽并持久化。回归 `tests/test_qml_storage.py::test_header_drag_resizes_item_column`：撤掉改动时失败、恢复后通过。
+- 验证：受影响的 20 个测试文件 532 passed（1 条查询页默认中心顺序预期按新首项更新后通过）；`ruff format --check` / `ruff check` 全仓通过；`--real` 快照确认工业页材料/成品下拉完整显示「索巴色基」。
+- 注意：本地 market.db 在本次改动前只拉过 Jita（实测 Sobaseki 0 行、Jita 9,922 行）；升级后需更新一次 Sobaseki 价格，默认基准才有数据。隔离副本实测 `run_price_update(["Sobaseki"])` 181 秒完成。
+
+## BL-050 精炼产出没按「批量单位」折算，矿石收益虚高约 100 倍
+
+- 类型：缺陷
+- 状态：fixed（2026-11-17，待用户复核）
+- 证据（2026-11-17，只读真实 reference.db + 曙光 ESI）：
+  - 曙光 ESI `/universe/types/1230/` 返回凡晶石 `portion_size=100`；快照 `data/sde.zip:types.yaml` 同为 `portionSize: 100`（957 种物品为 100、109 种 250、104 种 5000）。`reprocessing_materials` 的数量是**每批**（凡晶石每 100 单位 → 400 三钛合金）。
+  - `services/refining_service.py:calc_value` 用 `mat_qty × yield × quantity` 计算，`quantity` 却是**单位数**，没有除以批量。实测 `calc_value(1230, quantity=100, yield_override=1.0)` 得三钛合金 28,000（应为 400 × 0.7… 量级，100 单位只够 1 批）；技能 5/5 时 100 单位凡晶石产出 1,366,200 ISK 对投入 766 ISK，利润率 178,165%。艾克诺岩利润率 9,000 万%。冰矿 `portion_size=1` 不受影响（−13.64%，合理）。
+  - `item` 表没有批量列（`services/importers/getitems.py:51-60` 只取 `volume`），所以计算侧拿不到批量。
+- 影响：查询页精炼面板、估价页「精炼价值」列对所有 `portion_size>1` 的物品（矿石、部分弹药/材料）高估约 `portion_size` 倍；精炼选品会被误导。
+- 修法：`item` 增加 `portion_size`，导入时写入；`calc_value` 按「整批数 = 单位数 // 批量」计算产出，余数不精炼（与游戏一致）。
+- 已修复（工作区待提交）：
+  - schema：`ref` v1→v2 补列 `item.portion_size`（`services/schema_migrations.py:_migrate_ref_v1_to_v2`，只加列、默认 NULL）；新库由 `getitems` 建表即带列。
+  - 回填：`sde_loader.write_portion_sizes`（ITEM_WRITERS → 初始化 `sde_data` 步骤）从 SDE `types.yaml` 写入；`init_check.check_portion_sizes` 有 NULL 时把 `sde_data` 判为未就绪，老用户升级后启动会自动补跑。隔离副本实测：迁移后 34,879 行 NULL、`sde_data=False` → 回填后 0 行 NULL、`sde_data=True`；分布 1×33,611 / 100×957 / 250×109 / 5000×104；二次运行跳过（幂等）；迁移前自动快照 `reference-*.db`。
+  - 计算：`RefiningService.calc_value` 按批计算，投入只计入精炼部分，新增 `portion_size / batches / leftover / volume_m3 / value_per_m3`；查询页选中物品时精炼数量默认一批，面板提示批数与余量，总计行增加「每方」。估价页「精炼价值」同口径修正。
+  - 修复前后对比（技能 5/5，1000 单位）：凡晶石产出 13,662,000 → 136,620 ISK（Jita 价）；艾克诺岩 9,690,330,100 → 96,903,301。按索巴色基价：凡晶石 +11.37%、每方 113.6 ISK；灼烧岩 −91.74%（输入价 300 ISK/单位 疑为薄盘口，不是公式问题）。
+- 回归：`tests/test_refining_service.py::test_portion_size_batches_and_value_per_m3`（250 / 99 / 100 单位三档）、`tests/test_query_detail.py::test_refine_total_rows`（并入「每方」与批量说明）、`tests/test_schema_migrations.py::test_v0_db_with_no_migrations_stamps_version`（补列断言）。
+- 验证：全量 `-m "not ui"` 1,812 + `-m ui` 1,175 用例。首轮跑出 14 条失败，**都是第 3 轮引入索巴色基后未同步的旧预期**（第 3 轮只挑测了部分文件）：其中 1 处是真缺口 —— `services/logistics.py` 兜底距离表缺 Sobaseki 五对，已按曙光星门图 `compute_jumps(..., "highsec")` 补上（吉他 7 / 艾玛 4 / 多迪谢 1 / 热那 5 / 赫克 12，未经游戏内核对）；其余 13 条为中心顺序 / 数量 / 列清单等预期更新。修正后对应文件全部通过。
+
+## BL-049 参考 T2 商人助手 / 开明网补齐功能
+
+- 类型：待办（功能）
+- 状态：done（第 1–5 项已实现，工作区待提交）
+- 来源：用户目标「参考 https://www.eveai.vip/ 与 T2 商人助手」。证据：T2 `ReadmeT2.txt`（GBK）更新日志 2023-09 至 2025-12；开明网 `/tools` 页面栏目（市场中心、制造计算、利润出货、行星开发、合同档案、综合估价、精炼估值、LP 兑换）。两者价格都以索巴色基为准。
+- 差距核对（按本仓库代码/功能清单检索）：
+  1. **LP 兑换价值**（T2「忠诚点价值页面」、开明网「LP 兑换」）—— 本仓库原先没有。**已实现**：查询页工具栏「LP 兑换」→ `ui_qml/bridge/lp_store_bridge.py`；兑换项取曙光 ESI `/loyalty/stores/{corp}/offers/`（公开接口，实测加达里海军 308 项），公司中文名取 `/universe/names/?language=zh`（快照里 286/286 家 `zh_name` 与英文相同）；公式在 `domain/lp.py`，缺价不按 0 计。实测（隔离副本、已拉索巴色基价格）：308 项中 266 项可估值。
+  2. 行星工业 / 加工链（T2 2023-09-26、开明网「行星开发」）—— **已实现加工利润**（工作区待提交）：查询页工具栏「行星加工」→ `ui_qml/bridge/pi_bridge.py`。
+     - 数据：曙光 ESI `/universe/schematics/{id}/` 只给名称与周期，没有原料/产物；配方取自客户端 `res:/staticdata/schematics.fsdbinary`（只读，md5 `177c2670…` 与索引一致，客户端 resfileindex 前后哈希不变），新增 `scripts/infinity_fsd.py:parse_schematics`（嵌套 FSD 哈希表布局见模块注释），导出 `data/pi_schematics.json`（68 条，两次导出逐字节相同），随发行包分发（`build_release.RELEASE_DATA_FILES`）。
+     - 交叉核对：68 条的 `cycle_time` 与曙光 ESI 全部一致；产物名 67/68 与 ESI `schematic_name` 相同，唯一差异 106「工业爆炸物」（ESI）vs「工业炸药」（物品表），是两套译名，产物 typeID 一致。所有原料/产物 typeID 都在本地物品表里。
+     - 公式：`domain/pi.py`，海关税计税基准 P0 5 / P1 400 / P2 7,200 / P3 60,000 / P4 1,200,000，出口 = 基准 × 税率、进口 = 基准 × 税率 × 0.5（[EVE University](https://wiki.eveuniversity.org/Planetary_Industry)）。只算加工利润，不模拟提取器产量与殖民地布局。
+  3. 「每方化矿」精炼估值（T2 2024-05-06、开明网「精炼估值」）—— **已实现**（工作区待提交）：查询页精炼面板总计行「每方」、`RefiningService.calc_value` 返回 `value_per_m3`。实现时发现并修复 BL-050（精炼没按批量折算）。
+  4. 运费按体积计入成本（T2 2024-03-25）—— **已实现**（工作区待提交）：贸易页工具栏「运费 ISK/m³」，排行表新增「净价差」「净每方」两列（追加在末尾，不挪既有列下标），「只看赚钱的」改按净价差判断；体积未知时净价差留空，不当作 0 运费。公式 `domain/freight.py`。制造页已有「材料/成品倍率」模拟跨区运费（`services/plan_aggregator.py:715`），未改动。
+  5. 改单小助手 / 看盘（T2「改单小助手」「看盘小精灵」）—— **压单检测已实现**（工作区待提交）：仪表盘挂单列表原有「位次」全市场判定（首位 / 并列最优 / 不在首位 / 无法判定），在此基础上给「不在首位」的挂单算抢回首位的改单价、汇总「被压单 N 笔」、双击行复制改单价。价格规则：曙光 Lonetrek 7 种物品 224 笔实时挂单的有效数字全部 ≤ 4 位，据此 `domain/order_price.py` 按 4 位有效数字网格取价（1,234 被压 → 1,233，跨数量级 1,000 → 999.9）。看盘小精灵（成交量柱状图）与已有「市场监控」页重叠，未另做。
+- 下一步：无（本清单 5 项均已落地；提交与发布由用户决定）。
+- 回归排查（2026-11-17）：`-m ui` 整档在 LP 用例之后出现 `Windows fatal exception: access violation`（崩点随机落在后续用例）。干净基线 worktree（HEAD `00c3762`）同档 1145 passed；当前工作树排除 `tests/test_lp_store_bridge.py` 后 1176 passed（两次）。根因：`LpStoreBridge.reload` 用无接收者的 lambda 接 `QThread.finished` 去 `_LIVE.discard(worker)`，该 lambda 在工作线程里执行，最后一个引用在线程收尾途中被丢掉。改为连到桥的槽 `_release_worker`（排队到主线程，先 `wait()` 再释放），端到端用例补断言 `_LIVE` 清空。修复后整档 1177 passed / 1 failed，失败项 `test_qml_all_items.py::test_click_cell_selects_and_copies`（剪贴板为空）单跑通过；基线上同组合 4 次里也有 1 次剪贴板类用例失败，属既有偶发，未处理。
+
 ## BL-001 查询页用户手册写了工具栏里已不存在的两个按钮
 
 - 类型：缺陷
@@ -119,15 +210,15 @@
 - 影响：`docs/dev/audit-report.md:46`、`:72` 的「单独立项整改（`ruff format .` 一次性格式化 + 恢复 CI format 检查）」不再需要重复开项；本条只保留「已核实」的结论，避免后续会话重新捡起。
 - 下一步：无需动作。关闭依据是**本次实测**而非某个 commit —— 试过 `git log --oneline -S"ruff format --check ." -- .github/workflows/ci.yml`，只返回当年加入该步骤的 `7dc9f26`（跳过动作只把命令改成了注释，`-S` 捕捉不到）。恢复 CI 校验的动作见 BL-005。
 
-## BL-008 GitHub Pages 的 Source 设置是否已完成 —— 需仓库外确认
+## BL-008 GitHub Pages 的 Source 设置
 
 - 类型：待决策
-- 状态：deferred
+- 状态：done（2026-11-17 用户确认设置已完成）
 - 证据：仓库侧流程已就绪 —— `.github/workflows/docs.yml` 存在，`on: push: branches: [main]`，`permissions` 含 `pages: write` / `id-token: write`。
   但 `docs/dev/audit-report.md:60-61` 要求的是网页端设置：「1. **GitHub Pages 设置**（网页端，Claude 无法代做）：> 仓库 → Settings → Pages → Source: 选择 **GitHub Actions**」——
   该设置在仓库文件里**看不出来**，无法从仓库判断是否已勾选。
 - 影响：若 Source 未设为 GitHub Actions，docs.yml 的部署不会发布站点，文档站 404 而 CI 看起来仍在跑。
-- 下一步：需用户到 GitHub 网页端确认（或看最近一次 docs.yml run 的结论）。**标注：需仓库外确认，不猜。** 本条在确认前保持 deferred。
+- 结论：2026-11-17 用户明确确认「BL-008 设置已完成」，据此关闭；本次未独立验证部署结果。
 
 ## BL-009 生产计划表列数：文档写 19，代码是 20
 

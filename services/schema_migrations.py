@@ -25,7 +25,7 @@ BACKUP_KEEP = 5
 # ── 当前 Schema 版本 ──
 # 每次有 schema 变更时加 1
 DB_SCHEMA_VERSIONS: dict[str, int] = {
-    "ref": 1,
+    "ref": 2,  # v1→v2: item.portion_size（精炼批量单位；数据由 sde_data 步骤从 SDE 回填）
     "mkt": 4,  # v1→v2: adjusted_price 列; v2→v3: market_prices(fetch_time) 索引; v3→v4: market_volume_snapshots 统计信息（**不建索引**，理由见迁移函数）
     "user": 24,  # v1→v2: user_blueprints.cost_per_run;  v2→v3: production_plans 扩展列;  v3→v4: production_plans 执行列;  v4→v5: 机库/计划星系列 + facility_cost_mult 补齐;  v5→v6: hangars 设施类型/设施税/改件;  v6→v7: plan_blueprint_bindings 多蓝图绑定表;  v7→v8: 回填空星系计划（从材料机库带出）;  v8→v9: 修复 production_plans 缺 v2 扩展列的历史库;  v9→v10: production_plans 扣减快照列（撤销精确返还）;  v10→v11: price_snapshots 表收口到迁移;  v11→v12: production_plans 引用式子项需求列（source_mother_ids/component_parent_type_id/demand，共享合并+母项联动重算）;  v12→v13: production_plans 科研作业列（activity/decryptor_type_id/success_rate/research_target_level/actual_output_runs）;  v13→v14: 修复「版本已到 13 但科研列缺失」的历史库;  v14→v15: production_plans 启动成本快照列（material_cost_snapshot，入库/撤销按启动时成本）;  v15→v16: user_blueprints 原图权威化（runs<0 → is_bpo=1/runs=0，-1 退场）;  v16→v17: asset_snapshots / open_orders 表;  v17→v18: asset_snapshots.line_value 列（运行中产线价值）+ order_events 台账表;  v18→v19: esi_tokens 表（按角色绑定的 ESI 刷新令牌）;  v19→v20: open_orders 归属列（char_id/is_corp —— 挂单变动按「角色 × 军团单」分组比较，多来源并存时不再互相误判成交）;  v20→v21: 回填制造计划的 product_name（多蓝图批量加入规划时整批写成第一张蓝图产品名的历史脏数据）;  v21→v22: watchlist_items.added_price（加入关注时的 Jita 卖价，取不到留 NULL）;  v22→v23: production_plans.bp_attempt_short（发明强制完成的尝试流程缺口审计列）;  v23→v24: production_plans.subitem_cost_snapshot（子项删除前固化自制成本，母项成本不回落市价）
     "bp": 3,  # v1→v2: blueprint_materials.wastefactor 列;  v2→v3: 蓝图表查找索引（逐件研究成本 37×）
@@ -691,6 +691,19 @@ def _migrate_user_v23_to_v24(db_path: str) -> str:
     return f"production_plans.subitem_cost_snapshot (新增 {net} 列)"
 
 
+def _migrate_ref_v1_to_v2(db_path: str) -> str:
+    """v1→v2: item 新增 ``portion_size``（精炼/制造的批量单位，BL-050）。
+
+    `reprocessing_materials.quantity` 是**每批**产出（凡晶石每 100 单位 → 400 三钛合金），
+    缺这一列时精炼按「每单位」算会把矿石收益放大约 100 倍。
+    **只加列、默认 NULL**：数值由初始化 `sde_data` 步骤（`sde_loader.write_portion_sizes`）
+    从 SDE 回填；`init_check.check_portion_sizes` 发现未回填会把该步骤判为未就绪。
+    读端把 NULL 当 1（与旧行为一致），回填前不会更糟。
+    """
+    net = _add_columns(db_path, "item", [("portion_size", "INTEGER DEFAULT NULL")])
+    return f"item.portion_size (新增 {net} 列)"
+
+
 def _migrate_bp_v2_to_v3(db_path: str) -> str:
     """v2→v3: 蓝图表查找索引（实测逐件研究成本 3.92ms → 0.10ms）"""
     from services.blueprint_reader import blueprint_index_sql
@@ -727,6 +740,9 @@ def _migrate_bp_v1_to_v2(db_path: str) -> str:
 # ── 迁移函数注册 ──
 # {库别名: {起始版本: 迁移函数}}
 _MIGRATIONS: dict[str, dict[int, Callable[[str], str]]] = {
+    "ref": {
+        1: _migrate_ref_v1_to_v2,
+    },
     "mkt": {
         1: _migrate_mkt_v1_to_v2,
         2: _migrate_mkt_v2_to_v3,

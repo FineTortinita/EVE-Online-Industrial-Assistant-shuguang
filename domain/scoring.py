@@ -68,6 +68,7 @@ def calc_manufacturing_score(
     is_alpha: bool,
     mat_price_mult: float = 1.0,
     bp_required_skills: Sequence[str] = (),
+    implant_time_mult: float = 1.0,
 ) -> dict:
     """纯函数：给定蓝图 + 价格提供者 + 参数，计算制造评分结果 dict。
 
@@ -200,6 +201,7 @@ def calc_manufacturing_score(
         te_level=bp_te,
         structure_time_mod=structure_time_mod,
         required_skill_levels=[int(skills.get(n, 0) or 0) for n in bp_required_skills],
+        implant_time_mult=implant_time_mult,
     )
     hours_per_run = actual_time / 3600
     # 未取整的秒级原始值：计划级聚合必须用它（hours_per_run 是 round 到 2 位的展示值，
@@ -396,6 +398,8 @@ def calc_trade_score(
 #  反应评分纯函数
 # ════════════════════════════════════════════════════════════════
 
+#: 已废弃的旧反应安装费口径（「收入 × 5%」作基数），2026-11-17 起反应改为与制造同一公式
+#: `EIV × (指数 × 建筑 + 设施税 + SCC 4%)`（BL-052-3）。常量仅保留给 `scoring_service` 的 re-export。
 REACTION_INSTALL_FEE_RATE = 0.05
 
 
@@ -414,11 +418,17 @@ def calc_reaction_score(
     system_id: int | None,
     structure_bonus: float,
     facility_tax_pct: float,
+    structure_time_mod: float = 1.0,
+    structure_mat_saving: float = 1.0,
+    is_alpha: bool = False,
 ) -> dict:
     """纯函数：给定反应蓝图/材料/价格，计算反应评分结果 dict。
 
-    与制造评分差异：无 ME/TE（waste_factor=1.0）、时间仅受高级工业理论影响、专用 SCI。
-    输出与重构前 ScoringService.calc_reaction_score 完全一致。
+    与制造的差异：没有 ME/TE；时间吃「反应理论」4%/级（不吃工业理论）；用反应专用 SCI。
+    与制造**相同**的部分（BL-052-3，2026-11-17 起）：
+      - 安装费 `EIV × (SCI × 建筑成本 + 设施税 + SCC 4% [+ Alpha])`，EIV = Σ 基础量 × adjusted_price；
+      - 材料吃精炼建筑反应改装件（`structure_mat_saving`，按整批游戏口径取整，见 `calc_material_for_runs`）；
+      - 时间吃建筑 / 改装件（`structure_time_mod`，塔塔拉 0.75 × 反应改件）。
     """
     result = {
         "score": 0.0,
@@ -435,21 +445,31 @@ def calc_reaction_score(
         "breakdown": {},
     }
 
-    # 材料成本（反应无 ME 浪费）
+    # 材料成本（反应无 ME；精炼建筑反应改件减材料，按单轮游戏口径取整）
     total_mat_cost = 0.0
     mat_detail = []
+    eiv_materials: list[tuple[int, float]] = []
+    eiv_market_materials: list[tuple[int, float]] = []
+    missing_adjusted = False
     for mat_id, mat_name, mat_qty in materials:
         mat_price = prices.get_price(mat_id, price_type_mat, mat_source_hub)
+        adj_price = prices.get_adjusted_price(mat_id)
+        if adj_price is None:
+            missing_adjusted = True
+            adj_price = 0.0
+        run_qty = calc_material_per_run(mat_qty, me_level=0, structure_mat_saving=structure_mat_saving)
         if mat_price:
-            total_mat_cost += mat_qty * mat_price
+            total_mat_cost += run_qty * mat_price
+        eiv_materials.append((mat_qty, adj_price))
+        eiv_market_materials.append((mat_qty, mat_price or 0.0))
         mat_detail.append(
             {
                 "name": mat_name,
                 "type_id": mat_id,
                 "base_qty": mat_qty,
-                "qty": round(mat_qty, 2),
+                "qty": run_qty,
                 "unit_price": mat_price or 0.0,
-                "subtotal": round((mat_price or 0.0) * mat_qty, 2),
+                "subtotal": round((mat_price or 0.0) * run_qty, 2),
             }
         )
     result["materials"] = mat_detail
@@ -466,8 +486,17 @@ def calc_reaction_score(
     revenue = prod_price * prod_qty
     total_cost = total_mat_cost
     sci = prices.get_system_cost_index(system_id, "reaction", hub=mat_source_hub)
-    install_base = REACTION_INSTALL_FEE_RATE * revenue
-    reaction_install_fee = install_base * sci * (1 - structure_bonus) * (1 + facility_tax_pct / 100)
+    # 与制造同一安装费公式（单一来源：EIV 全部材料有 adjusted_price 才用官方值，否则整项回退市价）
+    eiv_source = "market_fallback" if missing_adjusted else "adjusted"
+    eiv = sum(q * p for q, p in (eiv_market_materials if missing_adjusted else eiv_materials))
+    fee_detail = calc_job_cost_fees(
+        eiv=eiv,
+        sci=sci,
+        structure_mult=1.0 + structure_bonus,
+        facility_tax=facility_tax_pct / 100,
+        alpha_tax=ALPHA_TAX if is_alpha else 0.0,
+    )
+    reaction_install_fee = fee_detail["total_fee"]
     total_cost += reaction_install_fee
     broker_init = revenue * (broker_rate / 100)
     # 反应无「改价前挂单价」可依据，按同价改单建模（差额段 0）：只收新总价的折扣段，
@@ -483,8 +512,12 @@ def calc_reaction_score(
     # （高级工业理论的文案只管「制造和研究时间」，不含反应）
     reactions_lvl = skills.get(REACTIONS, 0)
     skill_mod = 1 - REACTIONS_SKILL_MULT * max(0, int(reactions_lvl or 0))
-    actual_time = base_time * skill_mod
+    actual_time = base_time * skill_mod * structure_time_mod
     hours_per_run = actual_time / 3600
+    # 与制造评分同名的未取整值：计划级汇总（`calculate_total_metrics`）读它们
+    result["actual_time_seconds"] = actual_time
+    result["revenue_per_run"] = revenue
+    result["fees_per_run"] = reaction_install_fee + broker_init + broker_relist + sales_tax
 
     # 「自己造一件」的**个人口径**成本 = (材料 + 反应作业费) ÷ 单轮产出，
     # **剔除**卖出费用（经纪费 / 改单费 / 销售税）；`cost_per_unit` 保持历史口径不动。
@@ -498,6 +531,13 @@ def calc_reaction_score(
         result["make_cost_per_unit"] = make_cost_per_unit
         result["hours_per_run"] = round(hours_per_run, 2)
         result["revenue_per_unit"] = round(prod_price, 2)
+        # 计划级汇总要的最少字段（材料成本 / 设施材料倍率）：亏本反应也要能算出采购量与成本
+        result["breakdown"] = {
+            "material_cost": round(total_mat_cost, 2),
+            "installation_fee": round(reaction_install_fee, 2),
+            "bp_me": 0,
+            "structure_mat_saving": structure_mat_saving,
+        }
         return result
 
     # 评分
@@ -536,7 +576,15 @@ def calc_reaction_score(
                 "broker_relist": round(broker_relist, 2),
                 "sales_tax": round(sales_tax, 2),
                 "reaction_install_fee": round(reaction_install_fee, 2),
-                "install_base": round(install_base, 2),
+                "installation_fee": round(reaction_install_fee, 2),
+                "bp_me": 0,
+                "structure_mat_saving": structure_mat_saving,
+                "eiv": round(eiv, 2),
+                "eiv_source": eiv_source,
+                "system_cost": fee_detail["system_cost"],
+                "facility_tax": fee_detail["facility_tax"],
+                "scc_surcharge": fee_detail["scc"],
+                "alpha_tax": fee_detail["alpha_tax"],
                 "sci": round(sci, 4),
                 "structure_bonus": round(structure_bonus, 4),
                 "facility_tax_pct": round(facility_tax_pct, 2),

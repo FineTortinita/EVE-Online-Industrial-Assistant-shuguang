@@ -69,8 +69,8 @@ class TestStructureBase:
             assert base["mat"] > 0 and base["cost"] > 0 and base["time"] > 0
 
     def test_rig_group_map_structure(self):
-        # 53 个制造改件组，映射为 (size, category, effect)
-        assert len(hic.RIG_GROUP_MAP) == 53
+        # 53 个工程建筑改件组 + 7 个精炼建筑反应改件组（1933-1939），映射为 (size, category, effect)
+        assert len(hic.RIG_GROUP_MAP) == 60
         for _gid, (size, cat, effect) in hic.RIG_GROUP_MAP.items():
             assert size in ("M", "L", "XL")
             assert cat
@@ -266,3 +266,55 @@ class TestRigCategoryLabel:
         catalog = hic.get_rig_catalog("raitaru")
         assert catalog[0]["category_key"] == "me_research"
         assert catalog[0]["category_label"] == "材料效率研究"
+
+
+class TestSecurityAndRefinery:
+    """BL-052-2/3：改装件按星系安等放大；精炼建筑只给反应加成、反应改件只作用于反应。"""
+
+    @pytest.fixture
+    def sec_db(self, rig_db):
+        with rig_db.connect("ref") as conn:
+            conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS solar_system (solar_system_id INTEGER PRIMARY KEY, security REAL);
+                INSERT INTO solar_system VALUES (1, 0.9), (2, 0.3), (3, -0.5);
+                CREATE TABLE IF NOT EXISTS item_groups (type_id INTEGER, group_id INTEGER);
+                INSERT INTO structure_rigs VALUES (46497, -2.4, -24.0);  -- L-Set 反应效率 II
+                """
+            )
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(item)")}
+            if "group_id" not in cols:
+                conn.execute("ALTER TABLE item ADD COLUMN group_id INTEGER")
+            conn.executemany(
+                "INSERT OR REPLACE INTO item (type_id, group_id) VALUES (?, ?)",
+                [(43920, 1816), (37160, 1819), (46497, 1939)],
+            )
+        with rig_db.connect("user") as conn:
+            conn.executescript(
+                """
+                INSERT INTO hangars (id, name, facility_type, rigs, solar_system_id) VALUES
+                    (11, '高安莱塔卢', 'raitaru', '[43920, 37160]', 1),
+                    (12, '低安莱塔卢', 'raitaru', '[43920, 37160]', 2),
+                    (13, '00莱塔卢', 'raitaru', '[43920, 37160]', 3),
+                    (14, '00塔塔拉', 'tatara', '[46497]', 3),
+                    (15, '低安塔塔拉', 'tatara', '[46497]', 2);
+                """
+            )
+        return rig_db
+
+    @pytest.mark.parametrize(
+        ("hangar", "activity", "mat", "time"),
+        [
+            (11, "manufacturing", 0.99 * 0.98, 0.85 * 0.80),
+            (12, "manufacturing", 0.99 * (1 - 0.02 * 1.9), 0.85 * (1 - 0.20 * 1.9)),
+            (13, "manufacturing", 0.99 * (1 - 0.02 * 2.1), 0.85 * (1 - 0.20 * 2.1)),
+            (13, "reaction", 1.0, 1.0),  # 工程建筑不给反应加成
+            (14, "reaction", 1 - 0.024 * 1.1, 0.75 * (1 - 0.24 * 1.1)),  # 塔塔拉 0.75 × 00 反应改件 ×1.1
+            (15, "reaction", 1 - 0.024, 0.75 * (1 - 0.24)),  # 反应改件低安系数 1.0
+            (14, "manufacturing", 1.0, 1.0),  # 精炼建筑不能制造，反应改件也不作用于制造
+        ],
+    )
+    def test_multipliers(self, sec_db, hangar, activity, mat, time):
+        cfg = hic.resolve_hangar_industry_config(hangar, activity=activity, _db=sec_db)
+        assert cfg["structure_mat_saving"] == pytest.approx(mat, abs=1e-6)
+        assert cfg["structure_time_mod"] == pytest.approx(time, abs=1e-6)

@@ -17,6 +17,7 @@ from typing import Any
 from PySide6.QtCore import Property, Signal, Slot
 
 from core.constants import TRADE_HUBS
+from services.name_resolver import hub_options
 from services.user_settings import get_material_price_mult, get_price_settings, set_material_price_mult
 from ui_qml.bridge.input_dialog import MODE_INT, InputBridge, InputQmlDialog
 from ui_qml.dialog_host import DialogBridge, QmlDialog
@@ -115,7 +116,7 @@ class BatchCostPriceBridge(DialogBridge):
         return [{"label": label} for _value, label in _SOURCES]
 
     #: 可选的贸易中心（顺序即下拉项顺序，与工具栏「区域」一致）
-    hubs = Property(list, lambda self: list(TRADE_HUBS), constant=True)
+    hubs = Property(list, lambda self: [item["label"] for item in hub_options(TRADE_HUBS)], constant=True)
 
     @Property(int, notify=stateChanged)
     def hubIndex(self) -> int:

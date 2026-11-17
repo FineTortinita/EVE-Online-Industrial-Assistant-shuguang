@@ -14,12 +14,9 @@ BOM 递归展开 — 支持 T2/T3 产业链的完整材料树
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass, field
-from typing import Any
 
 from core.container import get_container
-from domain.formulas import calc_material_for_runs
 
 
 def _default_db():
@@ -93,164 +90,65 @@ def _get_materials(conn, bp_id: int, activity: str = "manufacturing"):
 
 
 # ════════════════════════════════════════════════════
-#  核心：递归展开
+#  公开 API（计算走统一引擎 `domain.industry_calc`）
 # ════════════════════════════════════════════════════
 
 
-def _expand(
-    conn,
-    type_id: int,
-    needed_qty: float,
-    bp_me: int,
-    price_hub: str,
-    price_type: str,
-    depth: int,
-    max_depth: int,
-    seen: set[int],
-    cache: dict[int, BomNode],
+def _build_tree(
+    conn, result, type_id: int, quantity: float, price_hub: str, price_type: str, max_depth: int
 ) -> BomNode:
+    """引擎结果（合并后的 DAG）→ 展示用的树。
+
+    中间件在 DAG 里只有一个节点（全部上游需求合并取整一次）；树里它可能挂在多个父项下，
+    每处的数量按「该父项实际消耗 ÷ 合并总需求」比例分摊其子材料 —— 各处子树数量之和等于合并后的真值。
     """
-    内部递归展开。
+    pricing = _default_pricing()
+    price_cache: dict[int, float] = {}
+    name_cache: dict[int, str] = {}
 
-    Args:
-        conn: 数据库连接（已 ATTACH ref/mkt/bp）
-        type_id: 要展开的物品 type_id
-        needed_qty: 需要多少个（已含上层 ME/产量调整）
-        bp_me: 本层蓝图的 ME 等级
-        price_hub: 价格查询的贸易中心
-        price_type: 价格类型 'buy'/'sell'
-        depth: 当前递归深度
-        max_depth: 最大递归深度
-        seen: 已访问的 type_id 集合（循环检测）
-        cache: type_id → BomNode 缓存（同层相同物品复用）
+    def price(tid: int) -> float:
+        if tid not in price_cache:
+            price_cache[tid] = float(pricing.get_price(tid, price_type, price_hub) or 0.0)
+        return price_cache[tid]
 
-    Returns:
-        BomNode 根节点
-    """
-    name = _resolve_name(conn, type_id)
-    unit_price = _default_pricing().get_price(type_id, price_type, price_hub) or 0.0
+    def name(tid: int) -> str:
+        if tid not in name_cache:
+            name_cache[tid] = _resolve_name(conn, tid)
+        return name_cache[tid]
 
-    # 循环检测 / 深度限制
-    if depth > max_depth or type_id in seen:
+    def make(tid: int, qty: float, depth: int, inputs: dict[int, int] | None, scale: float, bp_id, out_qty) -> BomNode:
+        children: list[BomNode] = []
+        if inputs and depth < max_depth + 1:
+            for child, child_qty in inputs.items():
+                q = child_qty * scale
+                node = result.nodes.get(child)
+                if node is not None:
+                    children.append(
+                        make(child, q, depth + 1, node.inputs, q / node.demand, node.blueprint_type_id, node.output_qty)
+                    )
+                else:
+                    children.append(make(child, q, depth + 1, None, 0.0, None, 0))
+        if children:
+            subtotal = sum(c.subtotal for c in children)
+        else:
+            subtotal = price(tid) * qty
         return BomNode(
-            type_id=type_id,
-            name=name,
-            quantity=needed_qty,
-            base_quantity=0,
-            is_intermediate=False,
+            type_id=tid,
+            name=name(tid),
+            quantity=round(qty, 2),
+            base_quantity=int(out_qty or 0),
+            is_intermediate=bool(children),
+            children=children,
             depth=depth,
-            unit_price=unit_price,
-            subtotal=round(unit_price * needed_qty, 2),
-            blueprint_type_id=None,
-        )
-
-    # 缓存命中 — 注意：不同 needed_qty 不能复用，只缓存无子节点的情况
-    if type_id in cache and depth > 0:
-        cached = cache[type_id]
-        if not cached.is_intermediate:
-            # 叶子节点可以安全复用（数量缩放）
-            scaled = BomNode(
-                type_id=type_id,
-                name=cached.name,
-                quantity=needed_qty,
-                base_quantity=cached.base_quantity,
-                is_intermediate=False,
-                depth=depth,
-                unit_price=cached.unit_price,
-                subtotal=round(cached.unit_price * needed_qty, 2),
-                blueprint_type_id=None,
-            )
-            return scaled
-
-    # 查找蓝图
-    bp_row = _find_blueprint_for_product(conn, type_id, "manufacturing")
-    if not bp_row:
-        # 无蓝图 → 叶子节点（可直接购买的材料）
-        node = BomNode(
-            type_id=type_id,
-            name=name,
-            quantity=needed_qty,
-            base_quantity=0,
-            is_intermediate=False,
-            depth=depth,
-            unit_price=unit_price,
-            subtotal=round(unit_price * needed_qty, 2),
-            blueprint_type_id=None,
-        )
-        cache[type_id] = node
-        return node
-
-    bp_id, output_qty, _base_time = bp_row
-    output_qty = output_qty or 1
-
-    # 计算需要制造多少次（向上取整）
-    runs = math.ceil(needed_qty / output_qty)
-
-    mat_rows = _get_materials(conn, bp_id, "manufacturing")
-    if not mat_rows:
-        # 蓝图无材料记录 → 降级为叶子节点
-        node = BomNode(
-            type_id=type_id,
-            name=name,
-            quantity=needed_qty,
-            base_quantity=output_qty,
-            is_intermediate=False,
-            depth=depth,
-            unit_price=unit_price,
-            subtotal=round(unit_price * needed_qty, 2),
+            unit_price=price(tid),
+            subtotal=round(subtotal, 2),
             blueprint_type_id=bp_id,
         )
-        cache[type_id] = node
-        return node
 
-    # 标记已访问，防止循环
-    seen.add(type_id)
-
-    children: list[BomNode] = []
-    for mat_id, mat_base_qty in mat_rows:
-        # 每次制造需要的材料量（含 ME 损耗）
-        # runs 次制造共需要：
-        child_qty = calc_material_for_runs(mat_base_qty, 10, bp_me, runs)
-
-        child = _expand(
-            conn,
-            mat_id,
-            child_qty,
-            bp_me,  # 默认使用相同 ME（后续可扩展为每个子蓝图独立 ME）
-            price_hub,
-            price_type,
-            depth + 1,
-            max_depth,
-            seen,
-            cache,
-        )
-        children.append(child)
-
-    # 移除循环检测标记（允许在其他分支再次遇到）
-    seen.discard(type_id)
-
-    # 计算本节点成本 = 所有子节点之和
-    total_cost = sum(c.subtotal for c in children)
-
-    node = BomNode(
-        type_id=type_id,
-        name=name,
-        quantity=needed_qty,
-        base_quantity=output_qty,
-        is_intermediate=True,
-        children=children,
-        depth=depth,
-        unit_price=unit_price,
-        subtotal=round(total_cost, 2),
-        blueprint_type_id=bp_id,
-    )
-    cache[type_id] = node
-    return node
-
-
-# ════════════════════════════════════════════════════
-#  公开 API
-# ════════════════════════════════════════════════════
+    root = result.roots[0]
+    if root.blueprint_type_id is None or not root.inputs:
+        return make(type_id, float(quantity), 0, None, 0.0, root.blueprint_type_id, root.output_qty)
+    return make(type_id, float(quantity), 0, root.inputs, 1.0, root.blueprint_type_id, root.output_qty)
 
 
 def expand_bom(
@@ -263,110 +161,90 @@ def expand_bom(
     char_config: dict | None = None,
 ) -> dict:
     """
-    递归展开 BOM 树，返回完整的材料层级结构。
+    展开 BOM，返回材料层级结构（全部制造件自己造、反应产物与原料买入；所有层级用同一个 `bp_me`）。
+
+    数量来自统一引擎 `domain.industry_calc.calculate`：共享中间件**合并取整一次**、
+    `raw_materials` 按物品合并（以前同一种矿在不同分支各列一行、各自取整）。
 
     Args:
         type_id: 目标成品 type_id
         quantity: 需要多少个成品
-        bp_me: 顶层蓝图 ME 等级 (0-10)
+        bp_me: 蓝图 ME 等级 (0-10)，各层共用
         price_hub: 价格查询的贸易中心 (Jita, Amarr, ...)
         price_type: 价格类型 'buy' / 'sell'
-        max_depth: 最大递归深度（防呆，默认 5 层足够覆盖 T3）
+        max_depth: 中间件最大层级（防呆，默认 5 层足够覆盖 T3；更深的件按买入）
         char_config: 角色配置（预留，暂未使用）
 
     Returns:
         {
             "tree": BomNode,                  # 根节点（成品）
-            "full_cost": float,               # 总材料成本（含所有中间产品）
-            "leaf_only_cost": float,          # 只买原料的成本（不造中间产品）
+            "full_cost": float,               # 总材料成本（= 按合并后的原料清单买齐）
+            "leaf_only_cost": float,          # 同上（保留键名兼容）
             "depth": int,                     # 实际最大展开深度
-            "raw_materials": [...],           # 所有叶子节点
-            "intermediates": [...],           # 所有中间产品
+            "raw_materials": [...],           # 合并后的要买的东西
+            "intermediates": [...],           # 自己造的中间件（合并后）
         }
     """
-    result: dict[str, Any] = {
-        "tree": None,
-        "full_cost": 0.0,
-        "leaf_only_cost": 0.0,
-        "depth": 0,
-        "raw_materials": [],
-        "intermediates": [],
-    }
+    from domain.industry_calc import ACTIVITY_MANUFACTURING, Target, calculate
+    from services.blueprint_reader import SqliteBlueprintReader
 
     with _default_db().connect("ref", "mkt", "bp") as conn:
-        cache: dict[int, BomNode] = {}
-        seen: set[int] = set()
-
-        tree = _expand(
-            conn,
-            type_id,
-            float(quantity),
-            bp_me,
-            price_hub,
-            price_type,
-            depth=0,
+        result = calculate(
+            SqliteBlueprintReader(conn),
+            [
+                Target(
+                    int(type_id),
+                    quantity=max(int(quantity), 0),
+                    me_level=int(bp_me),
+                    key="root",
+                    activity=ACTIVITY_MANUFACTURING,
+                )
+            ],
+            me_for=lambda *_: int(bp_me),
             max_depth=max_depth,
-            seen=seen,
-            cache=cache,
         )
+        tree = _build_tree(conn, result, int(type_id), float(quantity), price_hub, price_type, max_depth)
+        pricing = _default_pricing()
 
-        # 收集叶子节点和中间产品
+        if result.roots[0].blueprint_type_id is None:
+            raws = {int(type_id): int(quantity)}  # 无配方：把它自己当唯一材料（既有调用方依赖这个兜底）
+        else:
+            raws = result.raws
         raw_materials: list[dict] = []
-        intermediates: list[dict] = []
-        max_depth_reached = 0
-
-        def _collect(node: BomNode):
-            nonlocal max_depth_reached
-            if node.depth > max_depth_reached:
-                max_depth_reached = node.depth
-
-            if not node.is_intermediate:
-                # 叶子节点
-                raw_materials.append(
-                    {
-                        "type_id": node.type_id,
-                        "name": node.name,
-                        "total_qty": round(node.quantity, 2),
-                        "unit_price": round(node.unit_price, 2),
-                        "subtotal": round(node.subtotal, 2),
-                    }
-                )
-            else:
-                # 中间产品
-                intermediates.append(
-                    {
-                        "type_id": node.type_id,
-                        "name": node.name,
-                        "quantity": round(node.quantity, 2),
-                        "blueprint_type_id": node.blueprint_type_id,
-                        "unit_cost": round(node.subtotal / node.quantity, 2) if node.quantity > 0 else 0.0,
-                        "subtotal": round(node.subtotal, 2),
-                        "depth": node.depth,
-                    }
-                )
-                for child in node.children:
-                    _collect(child)
-
-        _collect(tree)
-
-        # 计算总成本
-        full_cost = tree.subtotal
-
-        # 计算只买原料的成本（叶子节点 × 单价）
-        leaf_only_cost = sum(m["subtotal"] for m in raw_materials)
-
-        result.update(
+        for tid, qty in sorted(raws.items()):
+            unit = float(pricing.get_price(tid, price_type, price_hub) or 0.0)
+            raw_materials.append(
+                {
+                    "type_id": tid,
+                    "name": _resolve_name(conn, tid),
+                    "total_qty": qty,
+                    "unit_price": round(unit, 2),
+                    "subtotal": round(unit * qty, 2),
+                }
+            )
+        intermediates = [
             {
-                "tree": tree,
-                "full_cost": round(full_cost, 2),
-                "leaf_only_cost": round(leaf_only_cost, 2),
-                "depth": max_depth_reached,
-                "raw_materials": raw_materials,
-                "intermediates": intermediates,
+                "type_id": n.type_id,
+                "name": _resolve_name(conn, n.type_id),
+                "quantity": n.demand,
+                "runs": n.runs,
+                "leftover": n.leftover,
+                "blueprint_type_id": n.blueprint_type_id,
+                "depth": n.depth,
             }
-        )
+            for n in sorted(result.nodes.values(), key=lambda n: (n.depth, n.type_id))
+        ]
 
-    return result
+    leaf_cost = round(sum(m["subtotal"] for m in raw_materials), 2)
+    return {
+        "tree": tree,
+        "full_cost": leaf_cost,
+        "leaf_only_cost": leaf_cost,
+        "depth": max((n.depth for n in result.nodes.values()), default=0)
+        + (1 if raw_materials and result.roots[0].inputs else 0),
+        "raw_materials": raw_materials,
+        "intermediates": intermediates,
+    }
 
 
 # ════════════════════════════════════════════════════

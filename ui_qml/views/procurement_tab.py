@@ -75,7 +75,7 @@ class ProcurementDialog(QObject):
         #: 每个分区各自的排序状态 (列号, 是否升序)。与「两表各自排序」的原行为一致
         self._sort_state: dict[str, tuple[int, bool]] = {"buy": (-1, True), "stock": (-1, True)}
         self._price_type = "sell"
-        self._hub_text = "Jita"
+        self._hub_text = "Sobaseki"
         self._manual_overrides: dict[int, float] = {}  # 用户手改的采购量，重算后回放
         self._deleted_ids: set[int] = set()  # 本次打开期间删除的行；关闭窗口即清空
         self._summary_text = ""
@@ -363,7 +363,7 @@ class ProcurementDialog(QObject):
                 proc_plans,
                 hangar_id=None,
                 default_hangar_id=self._default_mat_hangar_id,
-                region_id=TRADE_HUB_IDS.get(self._hub_text, 10000002),
+                region_id=TRADE_HUB_IDS.get(self._hub_text, TRADE_HUB_IDS["Sobaseki"]),
                 price_type=self._price_type,
                 # 自制件集合按**全量**活跃计划算：`proc_plans` 只留了备料中的，而子项产线
                 # 往往正在生产中 —— 拿它现算会把子线漏掉、产物被重复计成待采购。

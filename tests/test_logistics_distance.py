@@ -129,7 +129,7 @@ class TestFallbackTable:
             assert TRADE_HUB_DISTANCES.get((b, a)) == d
 
     def test_covers_every_hub_pair(self):
-        """5 个中心两两 = 10 对，双向齐全"""
+        """6 个中心（含索巴色基）两两 = 15 对，双向齐全"""
         hubs = list(TRADE_HUB_SYSTEM_IDS)
         for a in hubs:
             for b in hubs:
@@ -140,7 +140,7 @@ class TestFallbackTable:
 class TestListTradeHubDistances:
     def test_returns_unique_pairs(self):
         result = list_trade_hub_distances()
-        assert len(result) == 10  # C(5,2) = 10
+        assert len(result) == 15  # C(6,2) = 15
 
     def test_values_match_get_distance_jumps(self):
         """两条路径不能给出不同数字（原先前者读硬编码表、后者走星门图）"""

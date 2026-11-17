@@ -11,6 +11,16 @@
 
 ## 函数
 
+### `_migrate_v1_sobaseki`
+
+```python
+def _migrate_v1_sobaseki(data: dict) -> dict
+```
+
+v1→v2：曙光主贸易中心是索巴色基；旧国际服默认 Jita 改为索巴色基（issue #1）。
+
+定义行：`22`
+
 ### `_migrate_settings`
 
 ```python
@@ -19,7 +29,7 @@ def _migrate_settings(data: dict) -> dict
 
 惰性升级 settings 结构：版本 < CURRENT 时逐级迁移并落盘。
 
-定义行：`23`
+定义行：`38`
 
 ### `_read_raw`
 
@@ -29,7 +39,7 @@ def _read_raw() -> dict | None
 
 读原始 JSON：文件不存在 → &#123;&#125;；存在但读不出来（损坏/被占用）→ None。
 
-定义行：`40`
+定义行：`55`
 
 ### `_backup_corrupt`
 
@@ -39,7 +49,7 @@ def _backup_corrupt() -> None
 
 settings.json 读不出来时先另存现场，再让调用方重建。
 
-定义行：`56`
+定义行：`71`
 
 ### `load_settings`
 
@@ -49,7 +59,7 @@ def load_settings() -> dict
 
 读取 settings.json，文件不存在或损坏时返回 &#123;&#125;；结构过期时先升级再返回。
 
-定义行：`67`
+定义行：`82`
 
 ### `_write_all`
 
@@ -59,7 +69,7 @@ def _write_all(data: dict) -> None
 
 全量写盘（含删除键）。
 
-定义行：`77`
+定义行：`92`
 
 ### `save_settings`
 
@@ -69,7 +79,7 @@ def save_settings(data: dict) -> None
 
 read-modify-write：把传入键合并进现有 settings.json（保留其它键）。
 
-定义行：`84`
+定义行：`99`
 
 ### `get_default_hangar_id`
 
@@ -79,7 +89,7 @@ def get_default_hangar_id(key: str) -> int | None
 
 读取默认机库设置（default_*_hangar_id 键）。
 
-定义行：`98`
+定义行：`113`
 
 ### `set_default_hangar_id`
 
@@ -89,7 +99,7 @@ def set_default_hangar_id(key: str, hangar_id: int | None) -> None
 
 写默认机库设置；None 时删除该键（对齐 TopToolbar -1 pop 语义）。
 
-定义行：`104`
+定义行：`119`
 
 ### `_price_setting_defaults`
 
@@ -99,7 +109,7 @@ def _price_setting_defaults() -> dict
 
 价格设置的默认值（hub 取贸易中心列表首项）。
 
-定义行：`126`
+定义行：`141`
 
 ### `get_price_settings`
 
@@ -109,7 +119,7 @@ def get_price_settings() -> dict
 
 价格来源设置 &#123;mat_hub, mat_price_type, mat_mult, prod_hub, prod_price_type, prod_mult&#125;。
 
-定义行：`141`
+定义行：`156`
 
 ### `get_material_price_mult`
 
@@ -119,7 +129,7 @@ def get_material_price_mult() -> float
 
 材料价格调整系数（默认 1.0）。
 
-定义行：`154`
+定义行：`169`
 
 ### `set_material_price_mult`
 
@@ -129,7 +139,7 @@ def set_material_price_mult(value: float) -> None
 
 写回材料价格调整系数（读-改-写，只动 price_settings.mat_mult，保留其它键）。
 
-定义行：`168`
+定义行：`183`
 
 ### `get_include_corp_wallet`
 
@@ -139,7 +149,7 @@ def get_include_corp_wallet() -> bool
 
 ESI 同步是否合计军团钱包（默认 False）。settings.json 可手改，只认真值。
 
-定义行：`181`
+定义行：`196`
 
 ### `set_include_corp_wallet`
 
@@ -149,7 +159,7 @@ def set_include_corp_wallet(value: bool) -> None
 
 写回「含军团钱包」开关（读-改-写，保留其它键）。
 
-定义行：`186`
+定义行：`201`
 
 ### `get_esi_orders_synced_at`
 
@@ -159,7 +169,7 @@ def get_esi_orders_synced_at() -> str
 
 上次 ESI 同步挂单的时刻；从没同步过返回空串（空串不挡任何导入）。
 
-定义行：`196`
+定义行：`211`
 
 ### `set_esi_orders_synced_at`
 
@@ -169,7 +179,7 @@ def set_esi_orders_synced_at(value: str) -> None
 
 记下 ESI 同步挂单的时刻（读-改-写，保留其它键）。
 
-定义行：`205`
+定义行：`220`
 
 ### `get_backup_enabled`
 
@@ -179,7 +189,7 @@ def get_backup_enabled() -> bool
 
 是否每天自动备份用户数据。**默认开**：这是保护性功能，默认关掉就没人受益。
 
-定义行：`223`
+定义行：`238`
 
 ### `set_backup_enabled`
 
@@ -189,7 +199,7 @@ def set_backup_enabled(value: bool) -> None
 
 写回「每天自动备份」开关（读-改-写，保留其它键）。
 
-定义行：`229`
+定义行：`244`
 
 ### `get_backup_keep`
 
@@ -199,7 +209,7 @@ def get_backup_keep() -> int
 
 最大保留备份份数。非数值 / 不在白名单 → 回落 ``BACKUP_KEEP_DEFAULT``。
 
-定义行：`234`
+定义行：`249`
 
 ### `set_backup_keep`
 
@@ -209,7 +219,7 @@ def set_backup_keep(value: int) -> None
 
 写回保留份数；不在白名单内按默认值落盘（UI 只给白名单选项，这里兜住手改）。
 
-定义行：`243`
+定义行：`258`
 
 ### `get_last_backup_date`
 
@@ -219,7 +229,7 @@ def get_last_backup_date() -> str
 
 上次自动备份的日期（``YYYY-MM-DD``）；从没备过返回空串。
 
-定义行：`249`
+定义行：`264`
 
 ### `set_last_backup_date`
 
@@ -229,4 +239,4 @@ def set_last_backup_date(value: str) -> None
 
 记下本次自动备份的日期（读-改-写，保留其它键）。
 
-定义行：`258`
+定义行：`273`

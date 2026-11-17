@@ -45,9 +45,19 @@ Item {
     /* 列宽：`TableView` 的 provider 与点击区必须同口径。
      * **不再把剩余宽度补给末列**（那是「列固定宽 + 铺满视口」的老口径）：宽度由桥按
      * 内容实测，表格右侧留白好过把每一列都拉宽 —— 这是覆盖在游戏上的浮窗。 */
+    property var resizedWidths: ({})
     function colWidth(col) {
+        // 英文列隐藏但保留索引，评分/单元格点击继续使用模型原列号。
+        if (col === 2) return 0
         const cols = page.mi ? page.mi.columns : []
-        return col < cols.length ? cols[col].width : 0
+        return resizedWidths[col] !== undefined ? resizedWidths[col]
+             : (col < cols.length ? cols[col].width : 0)
+    }
+    function resizeColumn(col, width) {
+        const next = Object.assign({}, resizedWidths)
+        next[col] = Math.max(34, width)
+        resizedWidths = next
+        tableView.forceLayout()
     }
 
     Rectangle {
@@ -454,6 +464,7 @@ Item {
                     anchors.top: parent.top
                     height: page.headerH
                     syncView: tableView
+                    interactive: false
                     clip: true
                     textRole: "text"
 
@@ -511,6 +522,11 @@ Item {
                             onClicked: if (page.mi)
                                 page.mi.sortByColumn(hcell.index)
                         }
+                        FColumnResizeHandle {
+                            objectName: "mfgResize" + hcell.index
+                            columnWidth: page.colWidth(hcell.index)
+                            onResized: function(w) { page.resizeColumn(hcell.index, w) }
+                        }
                     }
                 }
 
@@ -519,8 +535,7 @@ Item {
                     anchors.left: parent.left
                     anchors.top: headerView.bottom
                     anchors.bottom: parent.bottom
-                    // 列宽按内容实测、末列不铺满：表格宽度自己撑，超出就横向滚动
-                    width: Math.min(parent.width, contentWidth)
+                    anchors.right: parent.right
                     clip: true
                     boundsBehavior: Flickable.StopAtBounds
                     model: page.mi ? page.mi.model : null
@@ -533,7 +548,9 @@ Item {
                         policy: ScrollBar.AsNeeded
                     }
                     ScrollBar.horizontal: ScrollBar {
+                        objectName: "horizontalScroll"
                         policy: ScrollBar.AsNeeded
+                        active: true
                     }
 
                     delegate: Item {

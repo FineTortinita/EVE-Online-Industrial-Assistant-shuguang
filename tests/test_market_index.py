@@ -15,7 +15,7 @@ from services import market_index_service as mis
 from services.importers.getprices import GLOBAL_PRICE_DDL
 from services.price_history import PRICE_HISTORY_DDL
 
-_RID = mis.JITA_RID
+_RID = mis.DEFAULT_REGION_ID
 
 #: 固定基准日 —— 与真实时钟无关，保证用例可复现
 _BASE_DAY = date(2026, 1, 1)
@@ -306,6 +306,7 @@ def test_cards_and_series_without_data(db_manager):
     assert all(member["weight"] == 0.0 and member["capped"] is False for member in mpi["members"])
     assert all(member["price"] is None and member["chg30"] is None for member in mpi["members"])
     assert {member["source"] for member in mpi["members"]} == {"fixed"}
+    assert (mpi["basket_count"], mpi["qualified_count"], mpi["member_date"]) == (8, 0, None)
 
     assert mis.get_breadth(_db=db_manager) == {
         "date": None,
@@ -342,6 +343,7 @@ def test_series_members_carry_weight_price_and_source(db_manager):
     assert member["price"] == pytest.approx(100.0)
     assert member["chg30"] == pytest.approx(25.0)
     assert member["source"] == "fixed"
+    assert (series["basket_count"], series["qualified_count"], series["member_date"]) == (1, 1, _day(-1))
 
 
 def test_refresh_index_daily_materializes_and_cards_use_cache(db_manager):

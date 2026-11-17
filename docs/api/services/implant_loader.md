@@ -16,7 +16,7 @@ def _parse_implant_bonus(attrs: list) -> str
 
 从 dogma 属性解析人类可读的加成描述。
 
-定义行：`14`
+定义行：`16`
 
 ### `_implant_slot`
 
@@ -26,7 +26,7 @@ def _implant_slot(attrs: list) -> str
 
 按 dogma 加成属性判断该植入体归哪个插槽：A 生产与研究 / B 精炼与采矿 / C 通用。
 
-定义行：`60`
+定义行：`62`
 
 ### `load_implants`
 
@@ -36,4 +36,4 @@ def load_implants() -> list[dict]
 
 从 item_dogma 表加载所有工业植入体。
 
-定义行：`72`
+定义行：`74`

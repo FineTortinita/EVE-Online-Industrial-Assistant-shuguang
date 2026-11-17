@@ -93,6 +93,38 @@ def _case_research_cost(monkeypatch):
     return lambda: ResearchCostQmlDialog(_BrokenDb(), 691, "渡鸦级蓝图")
 
 
+def _case_industry_calc(monkeypatch):
+    """制造计算：带一份算好的结果加载，四个页签都有内容（计算本身见 tests/test_industry_calc_service.py）。"""
+    from services import char_config_resolver, inventory_manager
+    from services import industry_calc_service as ics
+    from ui_qml.bridge import industry_calc_bridge as icb
+
+    monkeypatch.setattr(inventory_manager, "get_hangars", lambda: [{"id": 1, "name": "莱塔卢"}])
+    monkeypatch.setattr(char_config_resolver, "get_character_list", lambda: ["main"])
+    job = ics.JobLine(5002, "反应物", "reaction", 1, 1, 1, 40, 200, 160, 5500.0, 0.02, 343.75, {}, 3600.0)
+    top = ics.JobLine(5001, "成品", "manufacturing", 0, 4, 1, 4, 4, 0, 20000.0, 0.01, 1050.0, {}, 7200.0)
+    result = ics.CalcResult(
+        targets=[{"type_id": 5001, "name": "成品", "quantity": 4, "runs": 4, "sell": 1e6, "buy": 9e5}],
+        raws=[ics.RawLine(1001, "三钛合金", "mineral", 400, 5.0, False, False),
+              ics.RawLine(5003, "卫星原料", "moon", 100, 60.0, True, False)],
+        jobs=[top, job],
+        waves={"manufacturing": [[top]], "reaction": [[job]]},
+        material_cost=2000.0, fee_total=1393.75, fee_manufacturing=1050.0, fee_reaction=343.75,
+        fee_parts={"system_cost": 310.0, "facility_tax": 63.75, "scc": 1020.0, "alpha_tax": 0.0},
+        leftover_credit=275.0, revenue_sell=3.8e6, revenue_buy=3.4e6,
+        longest_seconds=7200.0, total_line_seconds=10800.0,
+    )  # fmt: skip
+    monkeypatch.setattr(ics, "run", lambda req, db=None: result)
+
+    def _make():
+        dlg = icb.IndustryCalcQmlDialog()
+        dlg.bridge._targets = [{"type_id": 5001, "name": "成品", "qty": 4}]
+        dlg.bridge.recalc()
+        return dlg
+
+    return _make
+
+
 def _case_invention_batch(monkeypatch):
     """批量发明回填：两行覆盖「有解码器 / 不使用」两种只读列。
 
@@ -259,6 +291,21 @@ def _case_market_advice(monkeypatch):
     return lambda: MarketAdviceQmlDialog(2001, "渡鸦级")
 
 
+def _case_lp_store(monkeypatch):
+    import ui_qml.bridge.lp_store_bridge as lsb
+
+    monkeypatch.setattr(lsb.LpStoreBridge, "reload", lambda self: None)  # 加载护栏不打 ESI
+    monkeypatch.setattr("services.lp_service.list_npc_corporations", lambda db: [{"id": 1000035, "name": "加达里海军"}])
+    return lambda: lsb.LpStoreQmlDialog(db=object())
+
+
+def _case_pi(monkeypatch):
+    import ui_qml.bridge.pi_bridge as pib
+
+    monkeypatch.setattr(pib.PiBridge, "reload", lambda self: None)  # 加载护栏不读真库
+    return lambda: pib.PiQmlDialog(db=object())
+
+
 _LOADS_CASES: list[tuple[str, Any]] = [
     ("编辑生产计划", "plan_edit_factory"),
     ("批量编辑生产计划", _case_plan_edit_batch),
@@ -269,6 +316,7 @@ _LOADS_CASES: list[tuple[str, Any]] = [
     ("产出总表", "output_factory"),
     ("人物占用情况", "char_usage_factory"),
     ("填料总表", "materials_factory"),
+    ("制造计算", _case_industry_calc),
     ("研究分析", _case_research_cost),
     ("所需蓝图清单", "blueprint_requirements_factory"),
     ("子项并行配置", "child_parallel_factory"),
@@ -296,6 +344,8 @@ _LOADS_CASES: list[tuple[str, Any]] = [
     ("批量对比", _case_compare),
     ("数据初始化向导", _case_init_wizard),
     ("挂单建议", _case_market_advice),
+    ("LP 兑换价值", _case_lp_store),
+    ("行星加工利润", _case_pi),
 ]
 
 
@@ -497,17 +547,22 @@ def char_usage_factory(qapp, monkeypatch):
     `char_config.json` 漂移（`test_query_dashboard` 对同一对数据源也是这么打桩的）。
     """
     import services.char_capacity as cc
+    import services.character_planning_service as cps
     import services.plan_service as ps
 
-    monkeypatch.setattr(
-        ps,
-        "load_plans_for_wizard",
-        lambda: [{"status": "pending", "char_name": "甲", "category": "manufacturing", "parallels": 3}],
-    )
+    plans = [
+        {"id": 1, "product_name": "渡鸦级", "status": "pending", "char_name": "", "category": "manufacturing",
+         "parallels": 3, "runs": 2, "calculated_time": 7200, "group_number": 1, "sub_level": 0},
+        {"id": 2, "product_name": "组件", "status": "pending", "char_name": "甲", "category": "manufacturing",
+         "parallels": 2, "runs": 1, "calculated_time": 3600, "group_number": 1, "sub_level": 1},
+    ]  # fmt: skip
+    chars = {"characters": {"甲": {"skills": {"高级量产技术": 5, "批量生产学": 5}}}}
+    monkeypatch.setattr(ps, "load_plans_for_wizard", lambda: [dict(p) for p in plans])
     monkeypatch.setattr(cc, "get_character_list", lambda: ["甲"])
-    monkeypatch.setattr(
-        cc, "load_all_data", lambda: {"characters": {"甲": {"skills": {"高级量产技术": 5, "批量生产学": 5}}}}
-    )
+    monkeypatch.setattr(cc, "load_all_data", lambda: chars)
+    monkeypatch.setattr(cps, "get_character_list", lambda: ["甲"])
+    monkeypatch.setattr(cps, "load_all_data", lambda: chars)
+    monkeypatch.setattr(cps, "required_skills", lambda ids, db=None: {})
 
     from ui_qml.bridge.char_usage_bridge import CharacterUsageQmlDialog
 
@@ -518,18 +573,18 @@ def char_usage_factory(qapp, monkeypatch):
 def materials_factory(qapp, monkeypatch):
     import services.industry_dialog_queries as q
 
-    monkeypatch.setattr(
-        q,
-        "get_materials_summary",
-        lambda db: {
-            "materials": {34: {"name": "三钛合金", "total_qty": 1000, "_level": 0, "volume": 0.01}},
-            "inventory": {34: 200},
-            "prices": {34: {"sell": 5.0}},
-        },
-    )
+    monkeypatch.setattr(q, "get_fill_sheet", lambda db: _fill_sheet(need=1000, stock=200))
     from ui_qml.bridge.materials_dialog_bridge import MaterialsSummaryQmlDialog
 
     return MaterialsSummaryQmlDialog
+
+
+def _fill_sheet(*, need: int, stock: int, coming: int = 0) -> list[dict]:
+    short = max(0, need - stock - coming)
+    state = "ready" if stock >= need else ("coming" if short == 0 else "short")
+    row = {"type_id": 34, "name": "三钛合金", "need": need, "stock": min(stock, need), "frozen": 0,
+           "coming": coming, "short": short, "state": state}  # fmt: skip
+    return [{"hangar_id": 1, "hangar_name": "矿仓", "rows": [row]}]
 
 
 def test_output_summary_colours_profit_and_status(output_factory):
@@ -558,11 +613,16 @@ def test_char_usage_counts_planned_lines(char_usage_factory):
         block = blocks[0]
         assert [line["label"] for line in block["lines"]] == ["制造", "科研", "反应"]
         manufacturing = block["lines"][0]
-        assert manufacturing["active"] == 3, "待生产的 3 条并行线必须算进占用"
+        assert manufacturing["active"] == 2, "待生产（已派给甲）的 2 条并行线必须算进占用；未分配的那条不算甲的"
         assert manufacturing["max"] == 11, "上限由技能算（高级量产技术 + 批量生产学 各 5 级）"
         assert manufacturing["cap"] == 11
         assert block["statusText"] == "生产中"
-        assert dialog.bridge.occupancySummary == "1 人物 · 已规划 3/13"
+        assert dialog.bridge.occupancySummary == "1 人物 · 已规划 2/13"
+        # 人物规划：母项（等子项）派给甲，排在子项完工之后
+        rows = {r["cells"][0]["text"]: r["cells"] for r in dialog.bridge.planRows}
+        assert rows["渡鸦级"][4]["text"] == "甲" and rows["组件"][5]["text"] == "保持指定"
+        bars = dialog.bridge.lanes[0]["bars"]
+        assert [b["start"] for b in bars] == [0.0, 1.0]
     finally:
         dialog.deleteLater()
 
@@ -587,22 +647,16 @@ def test_materials_copy_row_and_copy_all(materials_factory):
 
 
 def test_materials_reports_all_ready(materials_factory, monkeypatch):
-    """全部到位时一键复制只给提示，不改剪贴板。"""
+    """全部到位（或子项会补上）时一键复制只给提示，不改剪贴板。"""
     import services.industry_dialog_queries as q
 
-    monkeypatch.setattr(
-        q,
-        "get_materials_summary",
-        lambda db: {
-            "materials": {34: {"name": "三钛合金", "total_qty": 100, "_level": 0, "volume": 0.01}},
-            "inventory": {34: 500},
-            "prices": {34: {"sell": 5.0}},
-        },
-    )
+    # 库存不够但子项会造出来补上（绿）：同样无需采购
+    monkeypatch.setattr(q, "get_fill_sheet", lambda db: _fill_sheet(need=100, stock=40, coming=60))
     from ui_qml.bridge.materials_dialog_bridge import MaterialsSummaryQmlDialog
 
     dialog = MaterialsSummaryQmlDialog()
     try:
+        assert dialog.bridge.rows[0]["cells"][8]["text"] == "子项会补上"
         dialog.bridge.topAction()
         assert "无需采购" in dialog.bridge.error
     finally:

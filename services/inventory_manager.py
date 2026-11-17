@@ -665,6 +665,29 @@ def move_items(item_ids: list[int], to_hangar_id: int):
                 )
 
 
+def move_quantity(item_id: int, to_hangar_id: int, quantity: int) -> int:
+    """把某一库存行的**一部分**移到另一机库（移库，阶段 4a）→ 实际移动的数量。
+
+    成本继承来源：目标机库按移入件的来源单价做加权平均（`add_item`），来源行单价不变、数量减少，
+    移完清零则删行（`deduct_item`）。同一事务内完成。数量超过现有按现有量移；同机库 / 非正数 → 0。
+    """
+    if quantity <= 0:
+        return 0
+    with _default_db().connect("user") as conn:
+        row = conn.execute(
+            "SELECT hangar_id, type_id, quantity, cost_price FROM inventory_items WHERE id = ?", (item_id,)
+        ).fetchone()
+        if not row or int(row[0]) == int(to_hangar_id):
+            return 0
+        src, type_id, have, cost = int(row[0]), int(row[1]), int(row[2] or 0), float(row[3] or 0)
+        qty = min(int(quantity), have)
+        if qty <= 0:
+            return 0
+        deduct_item(src, type_id, qty, conn=conn)
+        add_item(int(to_hangar_id), type_id, qty, cost, conn=conn)
+        return qty
+
+
 def _move_item_between_hangars(
     src_hangar: int,
     type_id: int,

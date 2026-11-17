@@ -59,6 +59,7 @@ from core.logger import log
 from services.inventory_clipboard_service import parse_purchase_clipboard
 from services.inventory_import import compute_missing_in_hangar, compute_row_delta, merge_same_type_rows
 from services.inventory_manager import apply_inventory_import, get_hangars, get_items
+from services.name_resolver import hub_options
 from services.user_settings import get_material_price_mult, set_material_price_mult
 from ui_qml.bridge.message_dialog import FMessageDialog
 from ui_qml.bridge.summary_dialog import SummaryTableBridge, SummaryTableQmlDialog, cell
@@ -98,8 +99,6 @@ _IMPORT_IN_FLIGHT = False
 
 #: 贸易中心（顺序与 Widgets 版的 combo 一致）
 _HUB_ORDER = ["Jita", "Amarr", "Dodixie", "Rens"]
-#: 贸易中心英文 → 中文（原 `ImportReviewDialog._HUB_NAMES`）
-_HUB_NAMES = {"Jita": "吉他", "Amarr": "艾玛", "Dodixie": "多迪", "Rens": "伦斯"}
 
 #: 导入模式：值 → 下拉显示名（原 combo 的两项）
 _MODES: list[tuple[str, str]] = [("incremental", "增量累加"), ("full", "全量同步")]
@@ -435,7 +434,7 @@ class ImportReviewBridge(DialogBridge):
     modes = Property(list, lambda self: [{"label": label} for _value, label in _MODES], constant=True)
     hubs = Property(
         list,
-        lambda self: [{"label": f"{h} ({_HUB_NAMES[h]})"} for h in _HUB_ORDER],
+        lambda self: hub_options(_HUB_ORDER),
         constant=True,
     )
     columns = Property(list, lambda self: [dict(c) for c in _REVIEW_COLUMNS], constant=True)

@@ -46,7 +46,7 @@ def apply_blueprint_diff(diff_rows: list[dict], hangar_id: int, mode: str='full'
 
 按勾选组应用增删，返回 (added, removed, blocked)。
 
-定义行：`146`
+定义行：`152`
 
 ## 类
 
@@ -79,4 +79,4 @@ def run(self)
 此函数暂无 docstring，欢迎补充。
 :::
 
-定义行：`94`
+定义行：`95`

@@ -202,6 +202,10 @@ Item {
             fitTexts: root.fitTexts
             rows: root.dashboard ? root.dashboard.sellOrderRows : []
             emptyText: root.dashboard ? root.dashboard.sellEmptyText : ""
+            onRowDoubleClicked: function (row) {
+                if (root.dashboard)
+                    root.dashboard.copyRepricePrice(false, row)
+            }
         }
 
         // ── 买单（下）────────────────────────────────────────
@@ -224,6 +228,10 @@ Item {
             fitTexts: root.fitTexts
             rows: root.dashboard ? root.dashboard.buyOrderRows : []
             emptyText: root.dashboard ? root.dashboard.buyEmptyText : ""
+            onRowDoubleClicked: function (row) {
+                if (root.dashboard)
+                    root.dashboard.copyRepricePrice(true, row)
+            }
         }
 
         // ── 汇总 ──────────────────────────────────────────────

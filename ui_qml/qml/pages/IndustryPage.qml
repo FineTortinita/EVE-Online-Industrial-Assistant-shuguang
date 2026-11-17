@@ -403,6 +403,12 @@ Item {
         spacing: Theme.spacingMd
 
         FButton {
+            objectName: "industryCalcButton"
+            primary: true
+            text: qsTr("制造计算")
+            onClicked: page.industry.openIndustryCalc()
+        }
+        FButton {
             text: qsTr("产线启动小助手")
             onClicked: page.industry.launchWizard()
         }

@@ -13,11 +13,11 @@ from typing import Any
 
 from PySide6.QtCore import Property, QObject, Signal, Slot
 
-from core.constants import TRADE_HUB_IDS, TRADE_HUB_SYSTEM_IDS
+from core.constants import TRADE_HUB_IDS
 from core.container import get_container
 from core.logger import log
 from services.char_config_resolver import load_all_data, resolve_char_config
-from services.name_resolver import resolve_system_display_names_batch
+from services.name_resolver import hub_options
 from ui_qml.models import EstimateQmlModel
 from ui_qml.workers.estimate_workers import ClipboardParseWorker
 
@@ -44,7 +44,7 @@ class EstimateBridge(QObject):
     def __init__(self, shell: object | None = None, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._shell = shell
-        self._hub = "Jita"
+        self._hub = "Sobaseki"
         self._discount = 1.0
         self._busy = False
         self._character = ""  # 惰性取默认（char_config.json 的 current）
@@ -71,12 +71,9 @@ class EstimateBridge(QObject):
         """贸易中心下拉 → `[{label, value}]`。
 
         `value` 是取价要的英文中心名（`core.constants.TRADE_HUB_IDS` 的键）；
-        `label` 走术语表的中英对照（`resolve_system_display_names_batch` → 「吉他 (Jita)」），
-        不在 QML 里硬编码中文。
+        `label` 只显示术语表中文，不在 QML 里硬编码中文。
         """
-        system_ids = [sid for hub in TRADE_HUB_IDS if (sid := TRADE_HUB_SYSTEM_IDS.get(hub))]
-        names = resolve_system_display_names_batch(system_ids)
-        return [{"label": names.get(TRADE_HUB_SYSTEM_IDS.get(hub, 0)) or hub, "value": hub} for hub in TRADE_HUB_IDS]
+        return hub_options(list(TRADE_HUB_IDS))
 
     def _characters_and_current(self) -> tuple[list[str], str]:
         """角色名列表 + 默认选中项（`char_config.json` 的 `current`，失效则取首项）。"""

@@ -891,6 +891,21 @@ class QueryDashboardBridge(QObject):
         self._rebuild_order_rows()
         self.changed.emit()
 
+    @Slot(bool, int)
+    def copyRepricePrice(self, is_buy: bool, row: int) -> None:
+        """双击挂单行：被压单时把抢回首位的改单价复制到剪贴板（游戏改单窗口直接粘贴）。"""
+        rows = self._buy_rows if is_buy else self._sell_rows
+        if not 0 <= row < len(rows):
+            return
+        price = rows[row].get("reprice")
+        if price is None:
+            self._status = "这笔挂单没有被压单（或行情无法判定），不需要改价"
+        else:
+            QApplication.clipboard().setText(f"{price:.2f}")
+            name = rows[row]["cells"][0]["text"]
+            self._status = f"已复制改单价 {price:,.2f}（{name}）—— 在游戏改单窗口粘贴"
+        self.changed.emit()
+
     @Property(str, constant=True)
     def buyEmptyText(self) -> str:
         return _EMPTY_BUY_TEXT
@@ -913,6 +928,9 @@ class QueryDashboardBridge(QObject):
             f"买单 {buy}",
             f"挂单总额 {total:,.2f} ISK",
         ]
+        undercut = sum(1 for row in (*self._sell_rows, *self._buy_rows) if row.get("reprice") is not None)
+        if undercut:
+            parts.append(f"被压单 {undercut} 笔（双击该行复制改单价）")
         if self._last_import_at:
             parts.append(f"本次导入 {self._last_import_at}")
         if self._pending_changes:
@@ -1755,11 +1773,21 @@ class QueryDashboardBridge(QObject):
         逐行与**该挂单所在市场的最优价**比较，四态见 `_order_position_text`。
         整行标红只用于「不在首位」；无法判定用次要文字色（不误标成告警）。
         """
+        from domain.order_price import undercut_price
+
         rows: list[dict] = []
         quotes = market or {}
         for record in sorted(records, key=lambda r: float(r["price"]), reverse=reverse):
             quote = _side_quote(quotes.get(int(record["order_id"])), bool(record["is_buy"]))
             position_text, position_token = _order_position_text(float(record["price"]), bool(record["is_buy"]), quote)
+            # 被压单 → 给出抢回首位的合法改单价（4 位有效数字网格，见 domain/order_price.py）
+            reprice = (
+                undercut_price(float(quote["price"]), bool(record["is_buy"]))
+                if position_token == _TOKEN_NOT_FIRST
+                else None
+            )
+            if reprice is not None:
+                position_text += f" → 改 {reprice:,.2f}"
             # 行色：只有「不在首位」整行红；其余（首位/并列/无法判定）默认色
             row_token = _TOKEN_NOT_FIRST if position_token == _TOKEN_NOT_FIRST else _TOKEN_PLAIN
             location = str(record["location_name"] or "")
@@ -1770,6 +1798,7 @@ class QueryDashboardBridge(QObject):
             owner = ((char_names or {}).get(char_id) or f"#{char_id}") if char_id else "—"
             rows.append(
                 {
+                    "reprice": reprice,
                     "cells": [
                         cell(name, row_token),
                         cell(position_text, position_token),
@@ -1777,7 +1806,7 @@ class QueryDashboardBridge(QObject):
                         cell(f"{int(record['volume_remain']):,}/{int(record['volume_total']):,}", row_token),
                         cell(location, row_token),
                         cell(owner, row_token),
-                    ]
+                    ],
                 }
             )
         return rows

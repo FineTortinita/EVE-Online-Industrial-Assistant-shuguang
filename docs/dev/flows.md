@@ -104,18 +104,27 @@ UI（财务/运费/精炼/BOM）→ services/pricing_service.py PricingService
 - 数据落库：`services/importers/getprices` 写 `market_prices`/`market_volume_snapshots`；`getindustry` 写 `industry_system_costs`/`industry_facilities`
 - **并存约定**：评分链路走 `scoring_service.get_price`，其余 UI 链路走 `PricingService`——两套取价路径同时存在，改价需两边同步
 
-## BOM 递归展开
+## BOM 展开（统一引擎）
 
 ```
-services/bom_expander.py: expand_bom / get_material_tree / get_flat_materials（公共入口）
-  → _expand 递归（T2/T3 产业链）
-      · _find_blueprint_for_product：bp.blueprint_products JOIN bp.blueprint_activities
-      · _get_materials：bp.blueprint_materials
-      · calc_material_for_runs：domain/formulas.py
-      · 价格：_default_pricing().get_price（PricingService，mkt.market_prices）
+domain/industry_calc.py: calculate(reader, targets, build=, scheduler=, saving=, me_for=)
+  1. 发现自己造的中间件、建有向图（环上的回边按买入切断）
+  2. 层级 = 从任一成品出发的最长路径（浅分支也要用的件推迟到最深层统一开工）
+  3. 由浅到深：合并全部上游需求 → 排产回调定 (并行, 每线流程) → 逐线整批取整展开下级；多出 = 边角料
+  · 读配方：services/blueprint_reader.SqliteBlueprintReader（排除 CCP 测试蓝图）
+  · 数量：domain/formulas.calc_material_for_runs（游戏取整 + 单件豁免）
+
+调用方（各自只注入口径，不再自己递归）：
+  services/plan_rebuild.compute_child_forest  ← rebuild_children（落库）/ plan_decompose.decompose_plan（预览）
+      scheduler = plan_net_runs（扣首个引用母项机库里的成品库存 + 并行寻优）
+      saving    = manufacturing_mat_saving（首个引用母项材料机库的建筑 × 改装件 × 安等）
+      me_for    = best_inventory_blueprint（库存里最好的那张蓝图）
+  services/bom_expander.expand_bom            ← 查询详情「制造材料」、关注页材料、市场链
+  services/plan_aggregator.calculate_output_with_overflow（产出总表的「材料溢出」= 节点边角料）
 ```
 
-- UI 无直接调用方；内部查询被 `plan_decompose`、`plan_rebuild` 复用
+- 默认策略：制造件自己造、反应产物买入（计划拆解现行口径）；`build=` 可改成全造（开明网式计算）。
+- 反应计划（`activity='reaction'`）：评分走 `calc_reaction_score`（精炼建筑倍率），待采购 / 填料总表按反应配方。
 
 ## 精炼价值
 
@@ -443,6 +452,7 @@ manufacturing 反向表）；制造/反应就是产物本身。界面（计划�
 - UI 同步调用（无独立 worker）：`inventory_manager.add_item`（加权平均成本）、`set_item_quantity`（经 `inventory_import.compute_import_diff` 全量覆盖/删除）、`move_items`（右键「移动到机库」）
 - `deduct_item` 被计划启动/展开/重建调用
 - 剪贴板导入按仓库类型校验（同一机库分两张表、两页签）：材料侧 `inventory_clipboard_service.parse_clipboard`（机库管理「库存修正/增量粘贴」、采购页「增量添加到仓库」）过滤蓝图行；`parse_purchase_clipboard`（机库管理 / 采购页「从钱包交易记录粘贴」）吃「钱包 → 交易记录」的买入行、不过滤蓝图；蓝图侧 `ui_data_service.parse_blueprint_clipboard`（蓝图管理「粘贴导入蓝图」）过滤材料行。判定见 `services/item_kind.py`（`item` group 名后缀 = 蓝图，失败开放），过滤数在预览框统计栏提示
+  - 正确来源是游戏内制造页面的蓝图列表。机库物品列表（名称 / 数量 / 分类 / … / 体积）没有 ME/TE/流程/原图类型：解析直接报错并提示改从制造页面复制，worker 在读取现有蓝图、生成全量同步差异前退出，不入库。
   - 蓝图侧解析**同时接受 `manufacturing` 与 `reaction`**：反应公式是蓝图仓库的正式成员，
     只认 manufacturing 会让它们在剪贴板里解析不出、进而被「全量同步」当成库中冗余删除。
     结构完整却认不出蓝图的行计入「未识别」计数并在预览框提示（不再无声消失）。

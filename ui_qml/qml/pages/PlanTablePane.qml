@@ -43,9 +43,6 @@ Item {
     property var colWidths: []
     property var colVisible: []
     property bool colsReady: false
-    // 产品列：宽度吃满剩余空间，不参与拖拽（对齐 Widgets 版的 Stretch）
-    readonly property int productCol: 3
-    readonly property int minProductWidth: 120
     // Phosphor 供应器要 `#rrggbb`；QML 的 `String(color)` 给的是 `#aarrggbb`
     readonly property string sortTint: encodeURIComponent(Theme.hex(Theme.primary))
 
@@ -82,32 +79,20 @@ Item {
         tableView.forceLayout()
     }
 
-    // 产品列宽度 = 视口剩余空间（不小于 120px）
-    function productWidth() {
-        let used = 0
-        for (let i = 0; i < colWidths.length; ++i) {
-            if (i === productCol || !colVisible[i])
-                continue
-            used += colWidths[i]
-        }
-        return Math.max(minProductWidth, tableView.width - used)
-    }
-
     function widthOf(col) {
         if (!colsReady)
             return 80
         if (!colVisible[col])
             return 0 // QML TableView 没有「隐藏列」，宽度 0 即隐藏
-        if (col === productCol)
-            return productWidth()
         return colWidths[col]
     }
 
     function setWidth(col, w) {
-        if (!colsReady || col === productCol)
+        if (!colsReady)
             return
         const meta = colMeta[col]
-        const clamped = Math.max(meta.minWidth, meta.maxWidth > 0 ? Math.min(w, meta.maxWidth) : w)
+        // 内容自动适配的上限不能限制用户主动拉宽。
+        const clamped = Math.max(meta.minWidth, w)
         if (clamped === colWidths[col])
             return
         const next = colWidths.slice()
@@ -264,7 +249,9 @@ Item {
             policy: ScrollBar.AsNeeded
         }
         ScrollBar.horizontal: ScrollBar {
+            objectName: "horizontalScroll"
             policy: ScrollBar.AsNeeded
+            active: true
         }
 
         delegate: Item {
@@ -516,6 +503,7 @@ Item {
         anchors.top: parent.top
         height: root.headerH
         syncView: tableView
+        interactive: false
         clip: true
 
         /* 表头标题一律由下面的 delegate 自己从 `root.colMeta` 取，这个角色**没人读**；
@@ -615,29 +603,11 @@ Item {
                 }
             }
 
-            // 右缘拖拽调列宽（产品列是 Stretch，不给拖）
-            Item {
-                id: resizeHandle
-                anchors.right: parent.right
-                anchors.top: parent.top
-                anchors.bottom: parent.bottom
-                width: Math.round(6 * Theme.fontScale)
-                visible: root.colMeta.length > hcell.index && !root.colMeta[hcell.index].product
-
-                HoverHandler {
-                    cursorShape: Qt.SplitHCursor
-                }
-
-                DragHandler {
-                    target: null
-                    onActiveChanged: if (active)
-                        hcell.startWidth = root.widthOf(hcell.index)
-                    onTranslationChanged: if (active)
-                        root.setWidth(hcell.index, hcell.startWidth + translation.x)
-                }
+            FColumnResizeHandle {
+                objectName: "planResize" + hcell.index
+                columnWidth: root.widthOf(hcell.index)
+                onResized: function(w) { root.setWidth(hcell.index, w) }
             }
-
-            property real startWidth: 0
         }
     }
 

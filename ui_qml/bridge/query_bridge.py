@@ -21,6 +21,7 @@ from PySide6.QtCore import Property, QObject, QTimer, Signal, Slot
 
 from core.constants import TRADE_HUB_IDS, TRADE_HUBS
 from core.logger import log
+from services.name_resolver import hub_options
 from ui_qml.theme import registry as theme
 
 __all__ = ["QueryBridge"]
@@ -42,7 +43,7 @@ class QueryBridge(QObject):
         super().__init__(parent)
         self._shell = shell
         self._current_query = ""
-        self._region_id = 10000002  # Jita，与 DEFAULT_REGION_ID 一致
+        self._region_id = TRADE_HUB_IDS[TRADE_HUBS[0]]  # 曙光主中心索巴色基
         self._suggestions: list[dict] = []
         self._history: list[str] = []
         self._busy = False
@@ -157,7 +158,7 @@ class QueryBridge(QObject):
 
     # ── 选项 ──────────────────────────────────────────────────
 
-    regions = Property(list, lambda self: list(TRADE_HUBS), constant=True)
+    regions = Property(list, lambda self: [item["label"] for item in hub_options(TRADE_HUBS)], constant=True)
 
     def _get_region_index(self) -> int:
         hubs = list(TRADE_HUBS)
@@ -371,6 +372,28 @@ class QueryBridge(QObject):
             start()  # 幂等：内部只在没起过时启动那两个线程
         self._all_visible = True
         self.statusChanged.emit()
+
+    @Slot()
+    def openLpStore(self) -> None:
+        """打开「LP 兑换价值」独立窗（参考 T2 商人助手忠诚点价值、开明网 LP 兑换）。"""
+        from PySide6.QtWidgets import QWidget
+
+        from ui_qml.bridge.lp_store_bridge import LpStoreQmlDialog
+
+        parent = self._shell if isinstance(self._shell, QWidget) else None
+        self._lp_dialog = LpStoreQmlDialog(parent)
+        self._lp_dialog.show()
+
+    @Slot()
+    def openPi(self) -> None:
+        """打开「行星加工利润」独立窗（参考 T2 商人助手行星加工链、开明网行星开发）。"""
+        from PySide6.QtWidgets import QWidget
+
+        from ui_qml.bridge.pi_bridge import PiQmlDialog
+
+        parent = self._shell if isinstance(self._shell, QWidget) else None
+        self._pi_dialog = PiQmlDialog(parent)
+        self._pi_dialog.show()
 
     @Slot()
     def closeAllItems(self) -> None:

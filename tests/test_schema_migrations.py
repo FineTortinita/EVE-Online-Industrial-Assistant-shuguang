@@ -187,7 +187,7 @@ def test_ensure_schema_failure_marks_failed(tmp_path, monkeypatch):
 
 
 def test_v0_db_with_no_migrations_stamps_version(tmp_path, monkeypatch):
-    """ref 库 user_version=0 且已是当前版本（无迁移）→ 必须显式写入版本号
+    """ref 库 user_version=0 → 跑完迁移后必须显式写入当前版本号
 
     否则磁盘版本永远是 0，check_schema 每次启动都失败、每次都弹下载窗。
     """
@@ -202,12 +202,14 @@ def test_v0_db_with_no_migrations_stamps_version(tmp_path, monkeypatch):
 
     result = sm.ensure_schema("ref")
 
-    assert result["after"] == 1
-    assert any("版本号" in s for s in result["applied"]), "应记录版本号初始化"
+    current = sm.DB_SCHEMA_VERSIONS["ref"]
+    assert result["after"] == current
     conn = sqlite3.connect(str(db_path))
     v = conn.execute("PRAGMA user_version").fetchone()[0]
+    cols = [row[1] for row in conn.execute("PRAGMA table_info(item)")]
     conn.close()
-    assert v == 1, "磁盘 user_version 应落盘为 1"
+    assert v == current, "磁盘 user_version 应落盘为当前版本"
+    assert "portion_size" in cols, "ref v1→v2 应补上 item.portion_size（BL-050）"
 
     # 二次运行不再标记（已是最新版本）
     result2 = sm.ensure_schema("ref")

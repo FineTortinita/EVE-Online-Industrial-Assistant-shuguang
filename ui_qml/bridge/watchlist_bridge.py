@@ -40,6 +40,7 @@ from typing import Any
 from PySide6.QtCore import Property, QObject, QTimer, Signal, Slot
 
 from core.constants import HUB_NAMES, TRADE_HUB_IDS
+from services.name_resolver import hub_options
 from ui_qml.models.watchlist_qml_model import DASH, WatchlistQmlModel
 from ui_qml.theme import registry as theme
 
@@ -719,7 +720,7 @@ class WatchlistBridge(QObject):
 
     searchText = Property(str, lambda self: self._search_text, notify=editorChanged)
     selectedName = Property(str, lambda self: self._selected_name, notify=editorChanged)
-    regions = Property(list, lambda self: list(_HUBS), constant=True)
+    regions = Property(list, lambda self: [item["label"] for item in hub_options(_HUBS)], constant=True)
     regionIndex = Property(int, lambda self: self._region_index, notify=editorChanged)
     note = Property(str, lambda self: self._note, notify=editorChanged)
     suggestions = Property(list, lambda self: self._suggestions, notify=suggestChanged)

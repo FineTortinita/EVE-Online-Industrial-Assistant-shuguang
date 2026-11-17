@@ -169,6 +169,24 @@ class TestSetItemQuantity:
         assert set_item_quantity(hid, 1001, -5) == 0
 
 
+class TestMoveQuantity:
+    """移库（部分数量）：来源减量单价不变，目标按来源单价加权平均（阶段 4a）。"""
+
+    def test_partial_move_inherits_cost(self, inv_db):
+        from services.inventory_manager import get_hangar_cost_map, get_hangar_stock, move_quantity
+
+        a, b = create_hangar("源"), create_hangar("目标")
+        item_id = add_item(a, 1001, 10, 4.0)
+        add_item(b, 1001, 10, 10.0)
+        assert move_quantity(item_id, b, 6) == 6
+        assert get_hangar_stock(a)[1001] == 4 and get_hangar_cost_map(a)[1001] == 4.0
+        assert get_hangar_stock(b)[1001] == 16 and get_hangar_cost_map(b)[1001] == pytest.approx(7.75)
+        # 超量按现有量移完、来源行删掉；同机库不动
+        assert move_quantity(item_id, b, 99) == 4
+        assert 1001 not in get_hangar_stock(a)
+        assert move_quantity(item_id, b, 1) == 0
+
+
 class TestUpdateCostPrice:
     """update_cost_price 覆盖单位成本"""
 

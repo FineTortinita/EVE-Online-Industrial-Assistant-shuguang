@@ -26,4 +26,4 @@ def set_app_user_model_id(app_id: str=APP_USER_MODEL_ID) -> bool
 
 设置当前进程的 AppUserModelID，返回是否设置成功（非 Windows 恒 False）。
 
-定义行：`23`
+定义行：`24`

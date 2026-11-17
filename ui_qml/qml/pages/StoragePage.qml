@@ -109,15 +109,21 @@ Item {
 
     /* 列宽：provider 与 delegate 必须同口径 —— 两处各算一次会错位。
      * 名称列吃满剩余空间（对齐 Widgets 版的 StretchLastSection 语义）。 */
+    // 表头右缘拖拽产生的列宽覆盖（列号 → 宽度）；名称列在用户拖动前吃满剩余空间
+    property var itemWidthOverrides: ({})
+    property var bpWidthOverrides: ({})
+
     function itemColWidth(col) {
         const cols = inv ? inv.itemColumns : []
         if (col >= cols.length)
             return 0
+        if (itemWidthOverrides[col] !== undefined)
+            return itemWidthOverrides[col]
         if (col === 1) {
             let used = 0
             for (let i = 0; i < cols.length; ++i) {
                 if (i !== 1)
-                    used += cols[i].width
+                    used += itemWidthOverrides[i] !== undefined ? itemWidthOverrides[i] : cols[i].width
             }
             return Math.max(140, itemTable.width - used)
         }
@@ -126,7 +132,23 @@ Item {
 
     function bpColWidth(col) {
         const cols = inv ? inv.blueprintColumns : []
+        if (bpWidthOverrides[col] !== undefined)
+            return bpWidthOverrides[col]
         return col < cols.length ? cols[col].width : 80
+    }
+
+    function setColWidth(table, col, w) {
+        const width = Math.max(40, Math.round(w))
+        if (table === itemTable) {
+            const next = Object.assign({}, itemWidthOverrides)
+            next[col] = width
+            itemWidthOverrides = next
+        } else {
+            const next = Object.assign({}, bpWidthOverrides)
+            next[col] = width
+            bpWidthOverrides = next
+        }
+        table.forceLayout()
     }
 
     /* 把桥里的价格来源设置灌进两个 FPriceSourceRow。
@@ -243,6 +265,18 @@ Item {
                         ToolTip.text: qsTr("在游戏「钱包 → 交易记录」里 Ctrl+A/C 复制后点这里：把负 ISK 的买入行按单价（成本）入到指定机库")
                     }
                     FButton {
+                        objectName: "esiAssetSyncButton"
+                        text: qsTr("从 ESI 同步资产")
+                        onClicked: if (page.inv)
+                            page.inv.syncAssetsFromEsi()
+
+                        HoverHandler {
+                            id: esiAssetHover
+                        }
+                        ToolTip.visible: esiAssetHover.hovered
+                        ToolTip.text: qsTr("拉取全部已绑定角色的资产，选一个游戏位置，按「库存修正」对账到当前机库（先预览再写入）。蓝图不在内（曙光 ESI 不开放蓝图权限）")
+                    }
+                    FButton {
                         text: qsTr("查看规划缺失材料")
                         onClicked: if (page.inv)
                             page.inv.openMaterialCoverage()
@@ -345,6 +379,25 @@ Item {
                                 enabled: page.inv ? page.inv.itemSortableColumns.indexOf(ih.index) >= 0 : false
                                 onClicked: if (page.inv)
                                     page.inv.sortItems(ih.index)
+                            }
+
+                            // 右缘拖拽调列宽；声明在排序区域之后，避免拖动被点击区域截获
+                            Item {
+                                anchors.right: parent.right
+                                anchors.top: parent.top
+                                anchors.bottom: parent.bottom
+                                width: Math.round(6 * Theme.fontScale)
+                                property real startWidth: 0
+                                HoverHandler {
+                                    cursorShape: Qt.SplitHCursor
+                                }
+                                DragHandler {
+                                    target: null
+                                    onActiveChanged: if (active)
+                                        parent.startWidth = page.itemColWidth(ih.index)
+                                    onTranslationChanged: if (active)
+                                        page.setColWidth(itemTable, ih.index, parent.startWidth + translation.x)
+                                }
                             }
                         }
                     }
@@ -656,6 +709,24 @@ Item {
                                 onClicked: if (page.inv)
                                     page.inv.sortBlueprints(bh.index)
                             }
+
+                            Item {
+                                anchors.right: parent.right
+                                anchors.top: parent.top
+                                anchors.bottom: parent.bottom
+                                width: Math.round(6 * Theme.fontScale)
+                                property real startWidth: 0
+                                HoverHandler {
+                                    cursorShape: Qt.SplitHCursor
+                                }
+                                DragHandler {
+                                    target: null
+                                    onActiveChanged: if (active)
+                                        parent.startWidth = page.bpColWidth(bh.index)
+                                    onTranslationChanged: if (active)
+                                        page.setColWidth(bpTable, bh.index, parent.startWidth + translation.x)
+                                }
+                            }
                         }
                     }
 
@@ -780,6 +851,20 @@ Item {
                     required property var modelData
                     text: modelData.name
                     onTriggered: page.inv.moveItems(itemMenu.targetRows, modelData.id)
+                }
+            }
+        }
+
+        // 移库（部分数量）：成本按来源单价继承到目标机库
+        FMenu {
+            title: qsTr("移动部分数量到")
+            enabled: itemMenu.state.single === true
+            Repeater {
+                model: itemMenu.state.moveTargets || []
+                FMenuItem {
+                    required property var modelData
+                    text: modelData.name
+                    onTriggered: page.inv.moveItemQuantity(itemMenu.row, modelData.id)
                 }
             }
         }

@@ -177,7 +177,7 @@ def trade_cart_file() -> str
 def log_dir() -> Path
 ```
 
-日志目录（用户主目录 .eve-assistant 下，不随 exe 目录移动）
+日志目录（用户主目录 .eve-assistant-shuguang 下，不随 exe 目录移动）
 
 定义行：`117`
 
@@ -187,7 +187,7 @@ def log_dir() -> Path
 def crashes_dir() -> Path
 ```
 
-崩溃转储目录（用户主目录 .eve-assistant 下，不随 exe 目录移动）
+崩溃转储目录（用户主目录 .eve-assistant-shuguang 下，不随 exe 目录移动）
 
 定义行：`122`
 

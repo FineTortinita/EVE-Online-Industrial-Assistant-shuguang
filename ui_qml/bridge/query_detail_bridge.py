@@ -18,6 +18,7 @@ QML 侧读 `query.detail.*`，不需要新的 context property，`registry`/`_sp
 
 from __future__ import annotations
 
+import sqlite3
 import time as _time
 from typing import Any
 
@@ -27,6 +28,7 @@ from PySide6.QtWidgets import QApplication
 from core.constants import TRADE_HUB_IDS, TRADE_HUBS
 from core.logger import log
 from domain.theme_contrast import ensure_contrast
+from services.name_resolver import hub_options
 from ui_qml.models.query_detail_model import (
     hub_bar_rows,
     material_rows,
@@ -123,7 +125,7 @@ class QueryDetailBridge(QObject):
     hubRows = Property(list, lambda self: list(self._hub_rows), notify=changed)
     hubSummary = Property(str, lambda self: self._hub_summary, notify=changed)
     #: 贸易中心名列表（顺序同 `core.constants.TRADE_HUBS`）—— 价格中心下拉框的 model。
-    hubNames = Property(list, lambda self: list(TRADE_HUBS), constant=True)
+    hubNames = Property(list, lambda self: [item["label"] for item in hub_options(TRADE_HUBS)], constant=True)
 
     # ── ② 订单列表 ────────────────────────────────────────────
 
@@ -203,6 +205,8 @@ class QueryDetailBridge(QObject):
         # 材料价格中心默认跟随查询区域；用户手动选过就不再覆盖（解耦但默认合理）。
         if not self._material_hub_touched:
             self._material_hub_index = self._price_hub_index
+        # 精炼数量默认 = 一批（矿石 100 单位一批，1 单位精炼不出任何东西，BL-050）
+        self._refine_qty = self._portion_size(self._type_id)
 
         self._hub_rows = []
         self._hub_summary = ""
@@ -339,9 +343,24 @@ class QueryDetailBridge(QObject):
         if self._type_id:
             self._load_refine()
 
+    @staticmethod
+    def _portion_size(type_id: int) -> int:
+        """物品的批量单位（未知 / 未回填按 1）。"""
+        from core.container import get_container
+
+        if not type_id:
+            return _DEFAULT_MATERIAL_QTY
+        try:
+            with get_container().db.connect("ref") as conn:
+                row = conn.execute("SELECT portion_size FROM item WHERE type_id = ?", (int(type_id),)).fetchone()
+        except sqlite3.OperationalError:
+            # 吞的是「旧 reference.db 尚无 portion_size 列」：迁移补列前按 1
+            return _DEFAULT_MATERIAL_QTY
+        return max(int((row[0] if row else 0) or 1), 1)
+
     @Slot(int)
     def setRefineQty(self, qty: int) -> None:
-        """精炼的数量（默认 1，与查询页「选中行 = 1 件」一致）。"""
+        """精炼的数量（选中物品时默认一批：矿石 100、其它多为 1）。"""
         qty = max(1, int(qty or 1))
         if qty == self._refine_qty:
             return
@@ -569,7 +588,10 @@ class QueryDetailBridge(QObject):
             inp = float((result or {}).get("total_input_value") or 0)
             profit = float((result or {}).get("total_profit") or 0)
             self._refine_summary = f"总计：产出 {out:,.2f} ISK / 投入 {inp:,.2f} ISK / 利润 {profit:,.2f} ISK"
-            self._refine_ore_note = self._ore_note(result or {})
+            from ui_qml.models.query_detail_model import refine_batch_note
+
+            notes = [self._ore_note(result or {}), refine_batch_note(result or {})]
+            self._refine_ore_note = "；".join(n for n in notes if n)
         self.changed.emit()
 
     @staticmethod

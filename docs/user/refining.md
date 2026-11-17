@@ -23,6 +23,14 @@
 | 矿石处理技能 | 每级 +2% 产出率加成 |
 | 上限 | 产出率上限 85% |
 
+## 批量单位与每方化矿
+
+精炼配方是**每批**产出：凡晶石 `portion_size = 100`，每 100 单位一批产出 400 三钛合金（产率 100% 时）。
+`calc_value` 按 `批数 = 数量 // portion_size` 计算，不足一批的余量不精炼、不计入投入价值（与游戏一致）。
+批量单位存在 `reference.db` 的 `item.portion_size`（初始化 `sde_data` 步骤从 SDE 回填，见 BL-050）。
+
+**每方化矿**（`value_per_m3`）= 精炼产出价值 ÷ 实际精炼的矿石体积，用于按货舱容积比较矿种。
+
 ## 使用示例
 
 ```python
@@ -52,6 +60,10 @@ print(result["margin_pct"])  # 利润率百分比
 | `input_value` | 输入原矿的市场价值 |
 | `profit` | 精炼利润 = total_value - input_value |
 | `margin_pct` | 利润率百分比 |
+| `portion_size` | 批量单位（未回填时按 1） |
+| `batches` / `leftover` | 实际精炼的批数 / 不足一批未精炼的余量 |
+| `volume_m3` | 实际精炼的矿石体积 |
+| `value_per_m3` | 每方化矿：产出价值 ÷ `volume_m3`；体积为 0 时为 `None` |
 
 ## API 参考
 

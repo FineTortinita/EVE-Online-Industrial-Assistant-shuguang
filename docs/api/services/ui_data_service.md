@@ -100,7 +100,7 @@ def parse_blueprint_clipboard_text(raw: str, db=None) -> tuple[list[dict], int, 
 
 打开 ref/bp 连接并解析剪贴板蓝图 → (蓝图行, 被过滤材料行数, 未识别蓝图行数)。
 
-定义行：`276`
+定义行：`278`
 
 ### `_lookup_bpid`
 
@@ -110,7 +110,7 @@ def _lookup_bpid(c, name_part)
 
 蓝图名 → blueprint_type_id（精确匹配蓝图；T2 名称去「蓝图」后缀后按产物反查）
 
-定义行：`282`
+定义行：`284`
 
 ### `_lookup_name`
 
@@ -120,7 +120,7 @@ def _lookup_name(c, bpid: int, fallback: str) -> str
 
 蓝图类型 ID → 显示名（找不到用剪贴板名兜底）
 
-定义行：`319`
+定义行：`321`
 
 ### `apply_blueprint_diff`
 
@@ -130,7 +130,7 @@ def apply_blueprint_diff(diff_rows: list[dict], hangar_id: int, mode: str='full'
 
 按勾选组应用增删，返回 (added, removed, blocked)。
 
-定义行：`326`
+定义行：`328`
 
 ### `search_manufacturable_items`
 
@@ -140,7 +140,7 @@ def search_manufacturable_items(query: str, db=None) -> list[dict]
 
 搜索可制造物品（item 表），返回 [&#123;type_id, zh_name, en_name&#125;, ...]。
 
-定义行：`403`
+定义行：`405`
 
 ### `get_all_manufacturable_product_ids`
 
@@ -150,7 +150,7 @@ def get_all_manufacturable_product_ids(db=None) -> list[int]
 
 获取所有制造活动蓝图的产品 type_id。
 
-定义行：`421`
+定义行：`423`
 
 ### `aggregate_procurement_summary`
 
@@ -160,4 +160,4 @@ def aggregate_procurement_summary(plans: list[dict], *, default_mat_hangar_id: i
 
 按统计条模式聚合备料中计划的采购金额/体积。
 
-定义行：`433`
+定义行：`435`

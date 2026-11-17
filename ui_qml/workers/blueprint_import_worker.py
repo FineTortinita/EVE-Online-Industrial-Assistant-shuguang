@@ -88,6 +88,7 @@ class _BlueprintImportWorker(QThread):
         super().__init__(parent)
         self._raw = raw
         self._hangar_id = hangar_id
+        self.error_message = ""
         self.filtered_count = 0  # 剪贴板里被过滤的材料行数（供预览提示）
         self.unresolved_count = 0  # 剪贴板里结构完整但认不出蓝图的行数（供预览提示）
 
@@ -96,9 +97,14 @@ class _BlueprintImportWorker(QThread):
         from services.ui_data_service import parse_blueprint_clipboard_text
 
         # 1. 解析剪贴板（材料行按仓库类型过滤并计数）
-        parsed, self.filtered_count, self.unresolved_count = parse_blueprint_clipboard_text(
-            self._raw, db=get_container().db
-        )
+        try:
+            parsed, self.filtered_count, self.unresolved_count = parse_blueprint_clipboard_text(
+                self._raw, db=get_container().db
+            )
+        except ValueError as exc:
+            self.error_message = str(exc)
+            self.finished_signal.emit([])
+            return
 
         # 2. 读取库中现有蓝图，按规格组聚合（保留行 id/备注，供原地更新而非删旧插新）
         existing: dict[tuple, list[dict]] = {}

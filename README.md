@@ -4,6 +4,7 @@
 > [Hermannmayer/EVE-Online-Industrial-Assistant](https://github.com/Hermannmayer/EVE-Online-Industrial-Assistant)
 > 二次开发（Apache-2.0）。行情、工业指数、合同、图标走曙光 ESI（`datasource=infinity`）；
 > 静态数据来自曙光客户端缓存与曙光 ESI 生成的快照。**不支持国际服**，也不读取国际版的数据目录或授权。
+> 默认价格基准为曙光主贸易中心**索巴色基（Sobaseki）**，另可切换吉他、艾玛等中心。
 > 下文功能介绍沿用上游，截图与贸易中心名为国际服示例。
 
 > 🧪 **公开测试版**：到 [Releases](https://github.com/FineTortinita/EVE-Online-Industrial-Assistant-shuguang/releases)

@@ -145,7 +145,7 @@ Item {
                         model: shell.regions
                         FMenuItem {
                             required property var modelData
-                            text: modelData.name
+                            text: modelData.label
                             checkable: true
                             checked: modelData.checked
                             onTriggered: shell.setRegion(modelData.name, !modelData.checked)

@@ -14,9 +14,6 @@ import math
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-# 浮点精度补偿：避免 1.1 * 100 = 110.00000000000001 → ceil 到 111
-_FP_EPSILON = 1e-10
-
 # ═══════════════════════════════════════════════════════════
 #  常量
 # ═══════════════════════════════════════════════════════════
@@ -81,9 +78,59 @@ BP_TIME_SKILL_TYPE_IDS: frozenset[int] = frozenset(
 )
 
 
+#: 结构改装件按所在星系安等放大加成（SDE 属性 2355 hiSecModifier / 2356 lowSecModifier /
+#: 2357 nullSecModifier；曙光 ESI 2026-11-17 实测制造 / 科研改装件为 1.0 / 1.9 / 2.1）。
+#: 反应改装件（组 1933-1939）只有 00/虫洞 1.1、高低安 1.0 —— 由调用方按改装件自身数值传入。
+RIG_SECURITY_MULT_MANUFACTURING: dict[str, float] = {"high": 1.0, "low": 1.9, "null": 2.1}
+
+
+def security_band(security: float | None) -> str:
+    """星系安等 → 改装件系数档位：≥0.45 高安、>0.0 低安、其余（含虫洞负值/未知）00。
+
+    `None`（机库没设星系）按高安处理 —— 系数 1.0 等于不放大，与旧行为一致。
+    游戏取「四舍五入到 1 位小数后的显示安等」：0.45 显示 0.5 属高安，0.04 显示 0.0 属 00。
+    """
+    if security is None:
+        return "high"
+    shown = round(float(security), 1)
+    if shown >= 0.5:
+        return "high"
+    if shown > 0.0:
+        return "low"
+    return "null"
+
+
+def rig_bonus_multiplier(bonus_pct: float, security_mult: float = 1.0) -> float:
+    """单个改装件加成（百分比，负数为减免）→ 乘数 `1 + bonus × 安等系数 / 100`。"""
+    return 1.0 + float(bonus_pct) * float(security_mult) / 100.0
+
+
+#: 植入体制造时间加成（SDE 属性 440 manufacturingTimeBonus，百分比，-4 = −4%）。
+IMPLANT_MANUFACTURING_TIME_ATTR = 440
+
+
+def implant_time_multiplier(bonus_pcts: Sequence[float]) -> float:
+    """植入体时间加成（百分比列表，负数为减免）→ 乘数 Π(1 + b/100)。空 → 1.0。"""
+    mult = 1.0
+    for b in bonus_pcts:
+        mult *= 1.0 + float(b) / 100.0
+    return mult
+
+
 # ═══════════════════════════════════════════════════════════
 #  材料浪费
 # ═══════════════════════════════════════════════════════════
+
+
+def _game_ceil(x: float) -> int:
+    """游戏口径取整：先 round 到 2 位小数再向上取整（`ceil(round(x, 2))`）。
+
+    多个乘数（ME × 建筑 × 改装件）叠加后的浮点尾差（如 100.00000000001）会先被 round 吃掉；
+    而真实的小数尾数（100.004）也按游戏规则抹平到 100 —— 旧口径 `ceil(x − 1e-10)` 给 101，
+    每作业多要 1 个（BL-052-4）。来源：EVE University Industry 页的官方材料公式
+    `max(runs, ceil(round(base × runs × ME × 建筑 × 改装件, 2)))`。
+    """
+    return math.ceil(round(x, 2))
 
 
 def calc_material_per_run(
@@ -94,15 +141,17 @@ def calc_material_per_run(
 ) -> int:
     """计算每轮次制造所需材料数量。
 
-    线性公式: ceil(db_qty × (100 - ME) / 100 × 结构减免)
+    公式: max(1, ceil(round(db_qty × (100 - ME) / 100 × 结构减免, 2)))
     ME 每级减 1%，最高 10 级（ME 10 = 基础量的 90%）。
     wastefactor 参数保留仅做兼容，不再参与计算。
     """
+    if db_qty <= 0:
+        return 0
     if me_level < 0:
         me_level = 0
     me_level = min(me_level, 10)
     result = db_qty * (100.0 - me_level) / 100.0 * structure_mat_saving
-    return math.ceil(result - _FP_EPSILON)
+    return max(1, _game_ceil(result))
 
 
 #: 单件材料（每轮基础量 ≤ 1）豁免材料效率。
@@ -122,13 +171,14 @@ def calc_material_for_runs(
 ) -> int:
     """计算多轮次制造所需材料总量。
 
-    材料效率适用于整个项目总量（不逐轮次取整）:
-    ceil(db_qty × runs × (100 - ME) / 100 × 结构减免)
+    材料效率适用于整个项目总量（不逐轮次取整），游戏口径:
+    max(runs, ceil(round(db_qty × runs × (100 - ME) / 100 × 结构减免, 2)))
 
-    单件材料（基础量 ≤ 1）按 `基础量 × 作业数` 计，不减 ME（见 `_SINGLE_UNIT_EXEMPT`）。
+    单件材料（基础量 ≤ 1）按 `基础量 × 作业数` 计，不减 ME（见 `_SINGLE_UNIT_EXEMPT`）——
+    这正是游戏公式里 `max(runs, …)` 的效果。
 
     **本函数是「一批要多少料」的单一定义处**：豁免以前只写在 `material_total_for_runs` 里，
-    而 BOM 展开、计划分解、采购聚合、`domain/bom.py` 都直接调本函数 —— 同一个蓝图会因为
+    而 BOM 展开、计划分解、采购聚合、`domain/industry_calc.py` 都直接调本函数 —— 同一个蓝图会因为
     走不同代码路径而要出不同的料（`calc_material_for_runs(1, 10, 10, 10)` 曾算出 9，
     官方口径是 10，差的就是 T2 组件那类单件料）。
     """
@@ -139,7 +189,7 @@ def calc_material_for_runs(
         return db_qty * n
     me_level = min(max(me_level, 0), 10)
     total = db_qty * n * (100.0 - me_level) / 100.0 * structure_mat_saving
-    return math.ceil(total - _FP_EPSILON)
+    return max(n, _game_ceil(total))
 
 
 def material_total_for_runs(
@@ -258,13 +308,14 @@ def calc_production_time(
     te_level: int = 0,
     structure_time_mod: float = 1.0,
     required_skill_levels: Sequence[int] | None = None,
+    implant_time_mult: float = 1.0,
 ) -> float:
     """计算实际制造时间（秒）。
 
     公式:
         bp_mod = Π(1 - 0.01 × 蓝图所需技能等级)      ← 客户端文案：机械工程学等每级 -1%
         skill_mod = (1 - 0.04 × industry) × (1 - 0.03 × adv_industry)
-        actual_time = base_time × skill_mod × bp_mod × (1 - 0.01 × TE) × structure_time_mod
+        actual_time = base_time × skill_mod × bp_mod × implant × (1 - 0.01 × TE) × structure_time_mod
 
     参数:
         base_time: 蓝图基础制造时间（秒）
@@ -276,6 +327,7 @@ def calc_production_time(
             的技能角色等级列表（如机械工程学 L5；过滤后由调用方传入，白名单见
             `BP_TIME_SKILL_TYPE_IDS`）。SDE 技能描述原文：「每升一级，所有需要机械工程学
             技能的物品的生产时间减少 1%」。None/空 → 不计该项（保持旧调用方行为）。
+        implant_time_mult: 植入体制造时间乘数（`implant_time_multiplier`，如 BX-804 → 0.96）。
 
     返回:
         实际时间（秒）
@@ -287,4 +339,4 @@ def calc_production_time(
     for lvl in required_skill_levels or ():
         bp_mod *= 1.0 - BP_SKILL_TIME_MULT * min(max(0, int(lvl)), 5)
     te_mod = 1.0 - TE_MULT_PER_LEVEL * max(0, te_level)
-    return base_time * skill_mod * bp_mod * te_mod * structure_time_mod
+    return base_time * skill_mod * bp_mod * implant_time_mult * te_mod * structure_time_mod

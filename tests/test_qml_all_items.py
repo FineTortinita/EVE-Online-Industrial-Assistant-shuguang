@@ -15,9 +15,9 @@ from PySide6.QtGui import QGuiApplication
 
 from tests.clipboard_wait import wait_for_clipboard
 from ui_qml.bridge import all_items_bridge as ai
+from ui_qml.bridge.all_items_bridge import DEFAULT_RID
 from ui_qml.dialog_host import QmlDialog
 from ui_qml.models.all_items_models import BCOLS, MCOLS, TCOLS
-from ui_qml.workers.all_items_workers import JITA_RID
 from ui_qml.workers.lifecycle import DEFAULT_WAIT_MS
 
 pytestmark = pytest.mark.ui
@@ -369,7 +369,7 @@ def test_manufacturing_mode_appends_mfg_columns_and_scores(qapp):
         bridge.showMfgMode()
 
         base = [c[0] for c in BCOLS]
-        expected = base[:3] + ["买价（Jita）", "卖价（Jita）"] + base[5:] + [c[0] for c in MCOLS]
+        expected = base[:3] + ["买价（Sobaseki）", "卖价（Sobaseki）"] + base[5:] + [c[0] for c in MCOLS]
         assert _titles(dlg) == expected
         assert bridge.showManufacturing is True
         assert bridge.progressVisible is True
@@ -396,7 +396,7 @@ def test_trade_mode_appends_trade_columns(qapp):
 
         titles = _titles(dlg)
         assert "买价（Amarr卖单）" in titles, "贸易模式的列标题带区域 + 买卖单"
-        assert "卖价（Jita卖单）" in titles
+        assert "卖价（Sobaseki卖单）" in titles
         assert titles[-len(TCOLS) :] == [c[0] for c in TCOLS]
         assert bridge.showTrade is True
 
@@ -463,7 +463,7 @@ def test_search_is_debounced_then_runs(qapp):
 
         bridge._do_search()  # type: ignore[attr-defined]
         assert bridge.statusText == "搜索中..."
-        assert bridge._sw.args == ["渡鸦", JITA_RID]  # type: ignore[attr-defined]
+        assert bridge._sw.args == ["渡鸦", DEFAULT_RID]  # type: ignore[attr-defined]
     finally:
         dlg.deleteLater()
 
@@ -668,12 +668,12 @@ def test_settings_dialogs_round_trip(qapp, monkeypatch):
         bridge = dlg.bridge
         _RecordingDialog.accept = False
         bridge.openMfgSettings()
-        assert bridge._mfg["hub"] == "Jita", "取消就不改设置"  # type: ignore[attr-defined]
+        assert bridge._mfg["hub"] == "Sobaseki", "取消就不改设置"  # type: ignore[attr-defined]
 
         _RecordingDialog.accept = True
         bridge.openMfgSettings()
         assert bridge._mfg["hub"] == "Amarr"  # type: ignore[attr-defined]
-        assert _RecordingDialog.calls[0]["args"][0] == {"hub": "Jita", "char": "main", "tax": 0}
+        assert _RecordingDialog.calls[0]["args"][0] == {"hub": "Sobaseki", "char": "main", "tax": 0}
     finally:
         dlg.deleteLater()
 

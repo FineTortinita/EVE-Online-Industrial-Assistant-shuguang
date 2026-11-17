@@ -26,7 +26,7 @@ def init_db(db_path)
 此函数暂无 docstring，欢迎补充。
 :::
 
-定义行：`35`
+定义行：`36`
 
 ### `get_industry_type_ids`
 
@@ -36,7 +36,7 @@ def get_industry_type_ids(db_path)
 
 从数据库获取工业相关 type_id 列表
 
-定义行：`50`
+定义行：`51`
 
 ### `fetch_type_dogma`
 
@@ -46,7 +46,7 @@ async def fetch_type_dogma(client, type_id: int) -> dict | None
 
 从 ESI 获取 type 的 dogma 属性
 
-定义行：`67`
+定义行：`68`
 
 ### `fetch_attribute_name`
 
@@ -56,7 +56,7 @@ async def fetch_attribute_name(client, attribute_id: int) -> tuple[int, str]
 
 从 ESI 获取 dogma attribute 的名称
 
-定义行：`88`
+定义行：`89`
 
 ### `main`
 
@@ -68,4 +68,4 @@ async def main(progress_cb=None)
 此函数暂无 docstring，欢迎补充。
 :::
 
-定义行：`105`
+定义行：`106`

@@ -50,7 +50,7 @@ _DEFAULT_HANGAR_KEYS: list[tuple[str, str]] = [
 ]
 
 #: 设施类型下拉的顺序（显示名取 `FACILITY_TYPE_LABELS`，与原 `addItem` 调用顺序一致）
-_FACILITY_ORDER: tuple[str, ...] = ("npc", "raitaru", "azbel", "sotiyo")
+_FACILITY_ORDER: tuple[str, ...] = ("npc", "raitaru", "azbel", "sotiyo", "athanor", "tatara")
 
 #: 「不修改引用」那一项的 id —— 与 `_DeleteHangarDialog` 里 `addItem(..., None)` 同义
 _NO_REPOINT = None
@@ -65,7 +65,9 @@ def base_bonus_text(facility_type: str | None) -> str:
     base = STRUCTURE_BASE.get(facility_type or "npc")
     if not base or not base["rig_size"]:
         return "NPC 空间站无结构本体加成，不可装配改装件"
-    return f"材料 {base['mat']} / 成本 {base['cost']} / 时间 {base['time']}（NPC=1.0）"
+    if base.get("reaction_only"):
+        return f"精炼建筑：仅反应生效，反应时间 {base['time']}（NPC=1.0）；改装件按星系安等放大"
+    return f"材料 {base['mat']} / 成本 {base['cost']} / 时间 {base['time']}（NPC=1.0）；改装件按星系安等放大"
 
 
 def rig_label(item: dict) -> str:

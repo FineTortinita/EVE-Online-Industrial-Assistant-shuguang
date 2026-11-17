@@ -31,6 +31,7 @@ from core.container import get_container
 from core.logger import log
 from core.paths import ensure_dirs_exist, window_geometry_file
 from domain.theme_contrast import ensure_contrast
+from services.name_resolver import hub_options
 from ui_qml.app_icon import ASSETS_DIR
 from ui_qml.bridge import CONTEXT_NAME, theme_singleton
 from ui_qml.constants import NAV_TREE
@@ -200,7 +201,10 @@ class ShellWindowBridge(QObject):
 
     @Property(list, notify=stateChanged)
     def regions(self) -> list[dict]:
-        return [{"name": name, "checked": name in self._window._update_regions} for name in TRADE_HUBS]
+        return [
+            {"name": item["value"], "label": item["label"], "checked": item["value"] in self._window._update_regions}
+            for item in hub_options(TRADE_HUBS)
+        ]
 
     @Property(bool, notify=stateChanged)
     def autoUpdate(self) -> bool:
@@ -1028,9 +1032,10 @@ class ShellWindow(QQuickView):
             return "区域: 全部"
         if not regions:
             return "区域: 无"
+        labels = [item["label"] for item in hub_options(regions)]
         if len(regions) <= 2:
-            return f"区域: {', '.join(regions)}"
-        return f"区域: {', '.join(regions[:2])} +{len(regions) - 2}"
+            return f"区域: {', '.join(labels)}"
+        return f"区域: {', '.join(labels[:2])} +{len(regions) - 2}"
 
     def set_update_region(self, name: str, checked: bool) -> None:
         if name not in TRADE_HUBS:
@@ -1090,7 +1095,7 @@ class ShellWindow(QQuickView):
             valid = [r for r in regions if r in TRADE_HUBS]
             if valid:
                 return valid
-        return ["Jita"]
+        return [TRADE_HUBS[0]]
 
     # ── 标题栏拖动（最大化即还原并跟手）───────────────────────
 

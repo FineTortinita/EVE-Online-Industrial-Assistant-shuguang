@@ -169,7 +169,7 @@ def run_pyinstaller():
 # 发行包内置的 data/ 白名单：只带「缺失会影响功能」的静态文件，
 # 运行期缓存/用户数据（sde.zip、*.yaml、caches/、search_history.json 等）一律不入包。
 # 实测：全量复制会把构建机上恰好存在的 380MB SDE 原料一起打进去。
-RELEASE_DATA_FILES = ("terminology.json", "mfg_browser_settings.json")
+RELEASE_DATA_FILES = ("terminology.json", "mfg_browser_settings.json", "pi_schematics.json")
 
 
 def _checkpoint_wal(db_path: str) -> None:
@@ -199,6 +199,7 @@ def organize_release():
             data/
                 terminology.json
                 mfg_browser_settings.json
+                pi_schematics.json  ← 行星加工配方（scripts.infinity_fsd schematics 导出）
             README.md
 
     模板库缺失直接失败：README 向用户承诺「发行包已内置静态数据、首启走本地快路径」，

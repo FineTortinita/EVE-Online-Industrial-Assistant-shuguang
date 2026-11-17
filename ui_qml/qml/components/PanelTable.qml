@@ -33,6 +33,8 @@ Item {
      * 空数组 = 全部按 ratios 分（默认，与改动前逐字一致）。 */
     property var fitTexts: []
     property string emptyText: ""
+    //: 双击行（行下标）。不连接就没有任何行为变化 —— 由用到它的面板自己决定做什么。
+    signal rowDoubleClicked(int row)
 
     readonly property int fntSmall: Math.round(11 * Theme.fontScale)
     readonly property int fntBase: Math.round(12 * Theme.fontScale)
@@ -169,11 +171,16 @@ Item {
                 delegate: Item {
                     id: rowItem
                     required property var modelData
+                    required property int index
                     width: body.width
                     height: root.rowH
 
                     readonly property var cells: rowItem.modelData && rowItem.modelData.cells
                                                  ? rowItem.modelData.cells : []
+
+                    TapHandler {
+                        onDoubleTapped: root.rowDoubleClicked(rowItem.index)
+                    }
 
                     Repeater {
                         model: rowItem.cells

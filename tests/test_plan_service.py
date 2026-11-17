@@ -16,7 +16,8 @@ def _build_user(db_manager):
             "char_name TEXT, status TEXT, profit REAL, margin REAL, score REAL, iskph REAL, "
             "material_cost REAL, calculated_time REAL, daily_output REAL, created_at TEXT, "
             "deposit_hangar_id INTEGER, mat_hangar_id INTEGER, solar_system_id INTEGER, "
-            "materials_ready INTEGER DEFAULT 0, assigned_blueprint_id INTEGER DEFAULT NULL)"
+            "materials_ready INTEGER DEFAULT 0, assigned_blueprint_id INTEGER DEFAULT NULL, "
+            "activity TEXT DEFAULT 'manufacturing')"
         )
         # 自动绑定/释放读取的关联表（schema v7 迁移产物），测试库补齐
         conn.execute(
@@ -134,6 +135,20 @@ def test_insert_plans_batch(db_manager, monkeypatch):
         r1 = conn.execute("SELECT * FROM production_plans WHERE id=?", (ids[0],)).fetchone()
         assert r1["parallels"] == 3
         assert r1["profit"] == 1.0
+        assert r1["activity"] == "manufacturing"  # 不传 activity 时按制造
+
+
+def test_insert_plans_batch_keeps_reaction_activity(db_manager, monkeypatch):
+    """PR #2 review：制造计算窗口把反应成品加入规划时，计划行必须记成反应，重建子项才找得到配方。"""
+    _build_user(db_manager)
+    _patch_container(db_manager, monkeypatch)
+    ids = plan_service.insert_plans_batch(
+        [{"type_id": 57457, "product_name": "强化碳纤维", "activity": "reaction", "data": {"runs": 5}}],
+        auto_bind=False,
+    )
+    with db_manager.connect("user") as conn:
+        row = conn.execute("SELECT activity, runs FROM production_plans WHERE id=?", (ids[0],)).fetchone()
+    assert (row["activity"], row["runs"]) == ("reaction", 5)
 
 
 def test_insert_plans_batch_empty(db_manager, monkeypatch):

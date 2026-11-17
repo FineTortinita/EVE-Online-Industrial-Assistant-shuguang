@@ -289,6 +289,17 @@ def test_refine_total_rows():
     assert refine_total_rows({}) == []
     assert refine_total_rows({"items": []}) == []
 
+    # 每方化矿：有体积才多一行「每方」
+    per_m3 = refine_total_rows({**result, "value_per_m3": 1366.2})
+    assert [r["label"] for r in per_m3] == ["产出", "利润", "每方"]
+    assert per_m3[2]["valueText"] == "1,366.20"
+
+    from ui_qml.models.query_detail_model import refine_batch_note
+
+    batch = {"items": [{"portion_size": 100, "batches": 2, "leftover": 50}]}
+    assert refine_batch_note(batch) == "每 100 单位一批，共 2 批，余 50 单位不精炼"
+    assert refine_batch_note({"items": [{"portion_size": 1, "batches": 3}]}) == ""
+
 
 # ════════════════════════════════════════════════════════════════
 #  QueryDetailBridge（ui：QObject，桥构造本身不起线程）
@@ -325,7 +336,12 @@ def test_bridge_defaults(qapp):
     assert bridge.materialHubIndex == 0
     assert bridge.materialQty == 1
     assert bridge.orderHeads == ["#", "价格 (ISK)", "数量", "空间站"]
-    assert bridge.hubNames == ["Jita", "Amarr", "Dodixie", "Rens", "Hek"]
+    # 下拉显示中文（BL-048）；顺序跟 TRADE_HUBS，首项索巴色基
+    from core.constants import TRADE_HUBS
+    from services.name_resolver import hub_options
+
+    assert bridge.hubNames == [o["label"] for o in hub_options(TRADE_HUBS)]
+    assert bridge.hubNames[0] == "索巴色基"
     assert bridge.bestBuyText == "—"
     assert bridge.bestSellText == "—"
 

@@ -16,7 +16,7 @@ def check_items() -> int
 
 返回 item 表中 **已填写名称** 的行数，<ITEMS_NAMED_READY 视为未初始化
 
-定义行：`17`
+定义行：`19`
 
 ### `check_item_names_ratio`
 
@@ -26,7 +26,7 @@ def check_item_names_ratio() -> float
 
 返回 item 表中缺名的比例（0~1），< 5% 视为可接受
 
-定义行：`30`
+定义行：`32`
 
 ### `check_prices`
 
@@ -36,7 +36,7 @@ def check_prices() -> int
 
 返回 market_prices 行数
 
-定义行：`48`
+定义行：`50`
 
 ### `check_blueprints`
 
@@ -46,7 +46,7 @@ def check_blueprints() -> int
 
 返回 blueprint_activities 行数，>1000 视为已初始化
 
-定义行：`61`
+定义行：`63`
 
 ### `check_blueprint_names`
 
@@ -56,7 +56,7 @@ def check_blueprint_names() -> int
 
 返回蓝图 type_id 在 item 表中缺名的数量
 
-定义行：`77`
+定义行：`79`
 
 ### `check_implants`
 
@@ -66,7 +66,7 @@ def check_implants() -> int
 
 返回 item_dogma 行数，>30 视为已初始化（32 个工业/发明植入体有 dogma）。
 
-定义行：`100`
+定义行：`102`
 
 ### `check_market_tree`
 
@@ -76,7 +76,7 @@ def check_market_tree() -> int
 
 返回 market_tree 行数，>500 视为已初始化
 
-定义行：`116`
+定义行：`118`
 
 ### `check_industry`
 
@@ -86,7 +86,7 @@ def check_industry() -> int
 
 返回 industry_system_costs 行数，>100 视为已初始化
 
-定义行：`132`
+定义行：`134`
 
 ### `check_icons`
 
@@ -96,7 +96,7 @@ def check_icons() -> tuple[int, int]
 
 返回 (已缓存/免下载数, 总数)，缓存达到 80% 视为已初始化
 
-定义行：`148`
+定义行：`150`
 
 ### `check_meta_groups`
 
@@ -106,7 +106,17 @@ def check_meta_groups() -> int
 
 返回 meta_group 表行数
 
-定义行：`174`
+定义行：`176`
+
+### `check_portion_sizes`
+
+```python
+def check_portion_sizes() -> int
+```
+
+返回 item.portion_size 仍为 NULL 的行数（>0 → sde_data 未就绪，见 BL-050）。
+
+定义行：`189`
 
 ### `check_type_materials`
 
@@ -116,7 +126,7 @@ def check_type_materials() -> int
 
 返回 reprocessing_materials 表行数
 
-定义行：`187`
+定义行：`205`
 
 ### `check_dogma_attrs`
 
@@ -126,7 +136,7 @@ def check_dogma_attrs() -> int
 
 返回 dogma_attribute 表行数
 
-定义行：`200`
+定义行：`218`
 
 ### `check_stations`
 
@@ -136,7 +146,7 @@ def check_stations() -> int
 
 返回 station 表行数
 
-定义行：`213`
+定义行：`231`
 
 ### `check_universe`
 
@@ -146,7 +156,7 @@ def check_universe() -> int
 
 返回 solar_system 表行数，>0 视为 universe 星系数据已加载。
 
-定义行：`226`
+定义行：`244`
 
 ### `check_structure_rigs`
 
@@ -156,7 +166,7 @@ def check_structure_rigs() -> int
 
 返回 structure_rigs 行数，>80 视为改件加成已初始化
 
-定义行：`247`
+定义行：`265`
 
 ### `check_schema`
 
@@ -166,7 +176,7 @@ def check_schema() -> bool
 
 检查已存在的库的 schema 版本是否匹配预期
 
-定义行：`263`
+定义行：`281`
 
 ### `check_all`
 
@@ -176,7 +186,7 @@ def check_all() -> dict
 
 返回各组件状态 &#123; "items": bool, "price_baseline": bool, "blueprints": bool, ... &#125;
 
-定义行：`287`
+定义行：`305`
 
 ### `missing_count`
 
@@ -186,4 +196,4 @@ def missing_count() -> int
 
 返回未就绪的组件数量
 
-定义行：`317`
+定义行：`335`

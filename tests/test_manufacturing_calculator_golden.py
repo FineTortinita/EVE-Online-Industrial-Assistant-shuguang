@@ -191,3 +191,68 @@ def test_production_time_missing_skills_defaults_to_zero_level():
 
     assert calc_production_time(3600) == pytest.approx(3600.0)
     assert calc_production_time(3600, 0, 0) == pytest.approx(3600.0)
+
+
+# ════════════════════════════════════════════════════════════════════
+#  BL-052：游戏口径取整 / 安等档位 / 植入体（2026-11-17）
+# ════════════════════════════════════════════════════════════════════
+
+
+@pytest.mark.parametrize(
+    ("base", "runs", "me", "saving", "expected"),
+    [
+        # 游戏 ceil(round(x, 2))：100.004 → 100（旧口径 ceil(x − 1e-10) 给 101，每作业多要 1）
+        (10_000, 1, 0, 1.00000040, 10_000),
+        (10_000, 1, 0, 1.0000006, 10_001),  # round 到 10000.01 → 10001，不能被 round 抹掉
+        # max(runs, …)：ME + 建筑让单件以上材料压到 < runs 时，至少每作业 1 个
+        (2, 10, 10, 0.5, 10),
+        # 莱塔卢 0.99 × ME10：Bantam 三钛 24000 → 21384（单件 1 不吃加成）
+        (24_000, 1, 10, 0.99, 21_384),
+        (1, 7, 10, 0.99, 7),
+    ],
+)
+def test_material_uses_game_rounding(base, runs, me, saving, expected):
+    assert calc_material_for_runs(base, 10, me, runs, saving) == expected
+
+
+@pytest.mark.parametrize(
+    ("security", "band"),
+    [(None, "high"), (1.0, "high"), (0.45, "high"), (0.44, "low"), (0.05, "low"), (0.04, "null"), (-0.68, "null")],
+)
+def test_security_band_uses_displayed_security(security, band):
+    from domain.formulas import security_band
+
+    assert security_band(security) == band
+
+
+def test_implant_time_multiplier_feeds_production_time():
+    from domain.formulas import calc_production_time, implant_time_multiplier
+
+    mult = implant_time_multiplier([-4.0, -2.0])
+    assert mult == pytest.approx(0.96 * 0.98)
+    assert calc_production_time(1000, implant_time_mult=mult) == pytest.approx(1000 * 0.9408)
+
+
+def test_raven_chain_matches_kaiming_reference():
+    """金样例：开明网「制造计算」乌鸦级（ME10、NPC 站，2026-11-17 实测）的逐步骤流程数与边角料。
+
+    配方取自曙光 blueprint.db 实值：乌鸦级吃 核心温度调节器 1 / 生命保障备份装置 75 / 自动修复储藏装置密封 150；
+    三者（产出 1 / 3 / 3）分别吃强化碳纤维 500 / 10 / 10；强化碳纤维为反应（200/轮，无 ME）。
+    开明网：生命保障 23 流程（边角料 −1）、自动修复 45、强化碳纤维 6 流程（边角料 −138）。
+    """
+    import math
+
+    lsbu = calc_material_for_runs(75, me_level=10)  # 67.5 → 68
+    aips = calc_material_for_runs(150, me_level=10)  # 135
+    assert (lsbu, aips) == (68, 135)
+    lsbu_runs, aips_runs = math.ceil(lsbu / 3), math.ceil(aips / 3)
+    assert (lsbu_runs, aips_runs, lsbu_runs * 3 - lsbu) == (23, 45, 1)
+
+    rcf = (
+        calc_material_for_runs(500, me_level=10, runs=1)
+        + calc_material_for_runs(10, me_level=10, runs=lsbu_runs)
+        + calc_material_for_runs(10, me_level=10, runs=aips_runs)
+    )
+    assert rcf == 450 + 207 + 405 == 1062
+    rcf_runs = math.ceil(rcf / 200)
+    assert (rcf_runs, rcf_runs * 200 - rcf) == (6, 138)

@@ -571,6 +571,19 @@ class ProductionLauncher(QObject):
         这样「制造 13 格 / 科研 1 格」不会在一行里留下十几个空档，各行也仍能纵向对齐。
         """
         self._usage = active_lines_by_category(self._all_plans)
+        # 蓝图技能要求（人物规划，阶段 5）：每轮刷新取一次，执行人物下拉标出技能不达标的人
+        try:
+            from services.character_planning_service import required_skills
+
+            self._req_skills = required_skills(int(p.get("blueprint_type_id") or 0) for p in self._all_plans)
+            self._char_skills = {
+                n: (c or {}).get("skills", {}) or {}
+                for n, c in ((load_all_data() or {}).get("characters", {}) or {}).items()
+            }
+        except Exception:
+            # 吞的是蓝图库缺表 / 人物配置读失败：下拉不标技能，其余照常
+            log.exception("读取蓝图技能要求失败")
+            self._req_skills, self._char_skills = {}, {}
         data = load_all_data()
         chars_data = data.get("characters", {}) or {}
         chars = list(self._char_list)
@@ -938,9 +951,16 @@ class ProductionLauncher(QObject):
         if chosen and chosen not in chars:
             chars.insert(0, chosen)
         index = 0
+        from domain.character_planning import missing_skills
+        from services.character_planning_service import SKILL_ACTIVITY
+
+        act = SKILL_ACTIVITY.get(str(plan.get("activity") or "manufacturing"), "manufacturing")
+        required = getattr(self, "_req_skills", {}).get((int(plan.get("blueprint_type_id") or 0), act), {})
         for char_name in chars:
             remaining = max_lines_for_category(char_name, cat) - int(self._usage.get(char_name or "", {}).get(cat, 0))
-            options.append({"label": f"{char_name}（剩 {max(remaining, 0)} 条）", "value": char_name})
+            gap = missing_skills(required, getattr(self, "_char_skills", {}).get(char_name, {})) if required else {}
+            tag = "，缺技能 " + "、".join(f"{k}{v[0]}" for k, v in gap.items()) if gap else ""
+            options.append({"label": f"{char_name}（剩 {max(remaining, 0)} 条{tag}）", "value": char_name})
             if chosen and char_name == chosen:
                 index = len(options) - 1
         return options, index
@@ -1163,6 +1183,52 @@ class ProductionLauncher(QObject):
         self._on_row_partial_start(int(plan_id))
 
     # ── 选中 / 底部 ──────────────────────────────────────
+
+    # ── ESI 作业对账（重构阶段 6）──────────────────────────────
+
+    def reconcile_esi_jobs(self) -> None:
+        """从 ESI 拉全部已绑定角色的进行中工业作业 → 与在产计划对账。
+
+        ESI 说某计划的全部线都已完成（ready / delivered）→ 置为「待下线」；游戏里有、本地没有对应计划的
+        作业逐条报出来（多半是忘了点「EVE 中已启动」，或在游戏里多开了线）。不改流程数 / 人物，只改状态。
+        """
+        from ui_qml.workers.esi_industry_worker import EsiIndustrySyncWorker
+
+        if getattr(self, "_esi_job_worker", None) is not None:
+            return
+        worker = EsiIndustrySyncWorker(parent=self)
+        self._esi_job_worker: EsiIndustrySyncWorker | None = worker
+        worker.result_signal.connect(self._on_esi_jobs)
+        worker.finished_signal.connect(self._on_esi_jobs_finished)
+        self._show_feedback("正在从 ESI 拉取工业作业…")
+        worker.start()
+
+    def _on_esi_jobs(self, payload: dict) -> None:
+        from services.esi_sync_service import mark_ready, reconcile_jobs
+
+        try:
+            res = reconcile_jobs(payload)
+        except Exception:
+            # 吞的是对账取数异常（user.db 读失败）：只在反馈栏报错，不动任何计划
+            log.exception("ESI 作业对账失败")
+            self._show_feedback("ESI 作业对账失败，详见日志")
+            return
+        n_ready = mark_ready(res["ready_ids"])
+        matched = sum(1 for m in res["matches"] if m.plan_id is not None)
+        parts = [f"ESI 进行中作业 {len(res['matches'])} 条，已对上计划 {matched} 条"]
+        if n_ready:
+            parts.append(f"{n_ready} 条计划游戏内已完成 → 待下线")
+        if res["unmatched"]:
+            parts.append(f"{len(res['unmatched'])} 条游戏作业没有对应计划（忘了点「EVE 中已启动」？）")
+        if payload.get("errors"):
+            parts.append("；".join(payload["errors"]))
+        self._show_feedback("；".join(parts))
+        self._on_poll()
+
+    def _on_esi_jobs_finished(self, ok: bool, msg: str) -> None:
+        self._esi_job_worker = None
+        if not ok:
+            self._show_feedback(f"ESI 作业对账失败：{msg}")
 
     def _show_feedback(self, text: str) -> None:
         """反馈按需显示 —— 无内容时不占位。"""

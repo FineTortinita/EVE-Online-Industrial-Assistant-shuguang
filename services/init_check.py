@@ -186,6 +186,22 @@ def check_meta_groups() -> int:
         return 0
 
 
+def check_portion_sizes() -> int:
+    """返回 item.portion_size 仍为 NULL 的行数（>0 → sde_data 未就绪，见 BL-050）。
+
+    列不存在（迁移前）也按「未就绪」处理：返回一个正数让初始化补跑。
+    """
+    try:
+        with closing(sqlite3.connect(REF_DB_PATH)) as conn:
+            c = conn.cursor()
+            c.execute("SELECT COUNT(*) FROM item WHERE portion_size IS NULL")
+            return int(c.fetchone()[0])
+    except Exception:
+        # 吞的是「库未建/列未补」等预期内异常：按未就绪处理
+        log.debug("item.portion_size 查询失败，按未就绪处理", exc_info=True)
+        return 1
+
+
 def check_type_materials() -> int:
     """返回 reprocessing_materials 表行数"""
     try:
@@ -312,7 +328,7 @@ def check_all() -> dict:
         "sde_core": (
             check_type_materials() > 0 and check_dogma_attrs() > 0 and check_stations() > 0 and check_universe() > 0
         ),
-        "sde_data": check_meta_groups() > 0 and check_blueprint_names() < 100,
+        "sde_data": check_meta_groups() > 0 and check_blueprint_names() < 100 and check_portion_sizes() == 0,
     }
 
 

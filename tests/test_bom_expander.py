@@ -4,23 +4,20 @@
   - _resolve_name: 物品名称解析
   - _find_blueprint_for_product: 蓝图查找
   - _get_materials: 材料列表获取
-  - _expand: 叶子节点 / 中间产品 / 循环检测 / 深度上限
+  - expand_bom 走统一引擎：共享中间件合并、原料按物品合并（环 / 深度见 tests/test_industry_calc.py）
   - expand_bom: 完整入口
   - 便捷函数: get_material_tree, get_flat_materials
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
 from services.bom_expander import (
-    BomNode,
     _find_blueprint_for_product,
     _get_materials,
     _resolve_name,
     expand_bom,
-    get_flat_materials,
-    get_material_tree,
 )
 
 pytestmark = pytest.mark.fast
@@ -89,276 +86,52 @@ class TestGetMaterials:
         assert result == []
 
 
-class TestExpand:
-    """内部 _expand 递归展开"""
+class TestExpandOnEngine:
+    """`expand_bom` 走统一引擎后的口径（真库：conftest 的 temp_db + 一条两层 BOM）。"""
 
-    @patch("services.bom_expander._default_pricing")
-    def test_leaf_node_no_blueprint(self, mock_pricing):
-        """无蓝图的物品 → 叶子节点"""
-        mock_pricing.return_value.get_price.return_value = 5.0
+    def test_shared_intermediate_merged_and_raws_summed(self, temp_db, monkeypatch):
+        """2001 吃 2003×5 与 1001×1000；2003 吃 1001×100 —— 1001 在两层都出现，原料清单只列一行、数量相加。
 
-        conn = MagicMock()
-        # 第一次 execute: _resolve_name (type_id=34 → mineral, 不走 execute)
-        # 但 _resolve_name 会查表，除非是矿物
-        # 使用非矿物 type_id 确保走查询路径
-        conn.execute.return_value.fetchone.side_effect = [
-            ("Widget", None),  # _resolve_name
-            None,  # _find_blueprint_for_product → no bp
+        ME10：2003 需 ceil(5×2×0.9)=9；1001 = 1000×2×0.9 + 100×9×0.9 = 1800 + 810。
+        """
+        with temp_db.connect("bp") as conn:
+            conn.execute("DELETE FROM blueprint_activities WHERE blueprint_type_id IN (3001, 3003)")
+            conn.execute("DELETE FROM blueprint_products WHERE blueprint_type_id IN (3001, 3003)")
+            conn.execute("DELETE FROM blueprint_materials WHERE blueprint_type_id IN (3001, 3003)")
+            conn.executemany(
+                "INSERT INTO blueprint_activities VALUES (?,?,?)",
+                [(3001, "manufacturing", 60), (3003, "manufacturing", 60)],
+            )
+            conn.executemany(
+                "INSERT INTO blueprint_products VALUES (?,?,?,?)",
+                [(3001, "manufacturing", 2001, 1), (3003, "manufacturing", 2003, 1)],
+            )
+            conn.executemany(
+                "INSERT INTO blueprint_materials VALUES (?,?,?,?,?)",
+                [
+                    (3001, "manufacturing", 2003, 5, 10),
+                    (3001, "manufacturing", 1001, 1000, 10),
+                    (3003, "manufacturing", 1001, 100, 10),
+                ],
+            )
+
+        class _P:
+            def get_price(self, tid, *_a):
+                return 2.0
+
+        monkeypatch.setattr("services.bom_expander._default_db", lambda: temp_db)
+        monkeypatch.setattr("services.bom_expander._default_pricing", lambda: _P())
+        res = expand_bom(2001, quantity=2, bp_me=10)
+        assert res["raw_materials"] == [
+            {
+                "type_id": 1001,
+                "name": res["raw_materials"][0]["name"],
+                "total_qty": 1800 + 810,
+                "unit_price": 2.0,
+                "subtotal": 5220.0,
+            }
         ]
-
-        from services.bom_expander import _expand
-
-        node = _expand(
-            conn=conn,
-            type_id=9999,
-            needed_qty=100.0,
-            bp_me=10,
-            price_hub="Jita",
-            price_type="sell",
-            depth=0,
-            max_depth=5,
-            seen=set(),
-            cache={},
-        )
-
-        assert node.type_id == 9999
-        assert node.name == "Widget"
-        assert node.quantity == 100.0
-        assert node.is_intermediate is False
-        assert node.unit_price == 5.0
-        assert node.subtotal == 500.0
-
-    @patch("services.bom_expander._default_pricing")
-    def test_intermediate_node_with_materials(self, mock_pricing):
-        """有蓝图的物品 → 中间产品 + 子节点"""
-        mock_pricing.return_value.get_price.return_value = 50_000_000.0
-
-        conn = MagicMock()
-
-        def execute_side_effect(sql, params=()):
-            mock_c = MagicMock()
-            if "FROM item" in sql:
-                mock_c.fetchone.return_value = ("Raven", "Raven")
-            elif "FROM blueprint_products" in sql:
-                if params == (2001, "manufacturing"):
-                    mock_c.fetchone.return_value = (3001, 1, 3600)
-                else:
-                    mock_c.fetchone.return_value = None
-            elif "FROM blueprint_materials" in sql:
-                mock_c.fetchall.return_value = [(34, 100)]
-            else:
-                mock_c.fetchone.return_value = None
-                mock_c.fetchall.return_value = []
-            return mock_c
-
-        conn.execute.side_effect = execute_side_effect
-
-        from services.bom_expander import _expand
-
-        node = _expand(
-            conn=conn,
-            type_id=2001,
-            needed_qty=1.0,
-            bp_me=10,
-            price_hub="Jita",
-            price_type="sell",
-            depth=0,
-            max_depth=5,
-            seen=set(),
-            cache={},
-        )
-
-        assert node.type_id == 2001
-        assert node.is_intermediate is True
-        # Type_id 34 is a mineral → _resolve_name returns from _MINERAL_NAMES
-        assert len(node.children) == 1
-        assert node.children[0].is_intermediate is False
-
-    @patch("services.bom_expander._default_pricing")
-    def test_depth_limit(self, mock_pricing):
-        mock_pricing.return_value.get_price.return_value = 10.0
-        conn = MagicMock()
-        conn.execute.return_value.fetchone.side_effect = [("Deep", None), None]
-
-        from services.bom_expander import _expand
-
-        node = _expand(
-            conn=conn,
-            type_id=999,
-            needed_qty=5.0,
-            bp_me=0,
-            price_hub="Jita",
-            price_type="buy",
-            depth=6,
-            max_depth=5,
-            seen=set(),
-            cache={},
-        )
-        assert node.is_intermediate is False
-        assert node.quantity == 5.0
-
-    @patch("services.bom_expander._default_pricing")
-    def test_cycle_detection(self, mock_pricing):
-        mock_pricing.return_value.get_price.return_value = 99.0
-        conn = MagicMock()
-        conn.execute.return_value.fetchone.side_effect = [("Loop", None), None]
-
-        from services.bom_expander import _expand
-
-        node = _expand(
-            conn=conn,
-            type_id=2001,
-            needed_qty=1.0,
-            bp_me=5,
-            price_hub="Jita",
-            price_type="sell",
-            depth=2,
-            max_depth=5,
-            seen={2001},
-            cache={},
-        )
-        assert node.is_intermediate is False
-        assert node.type_id == 2001
-
-    @patch("services.bom_expander._default_pricing")
-    def test_empty_materials_list(self, mock_pricing):
-        """蓝图无材料记录时降级为叶子"""
-        mock_pricing.return_value.get_price.return_value = 5000.0
-
-        conn = MagicMock()
-
-        def execute_side_effect(sql, params=()):
-            mock_c = MagicMock()
-            if "FROM item" in sql:
-                mock_c.fetchone.return_value = ("EmptyBP", None)
-            elif "FROM blueprint_products" in sql:
-                mock_c.fetchone.return_value = (4001, 1, 1200)
-            elif "FROM blueprint_materials" in sql:
-                mock_c.fetchall.return_value = []
-            else:
-                mock_c.fetchone.return_value = None
-            return mock_c
-
-        conn.execute.side_effect = execute_side_effect
-
-        from services.bom_expander import _expand
-
-        node = _expand(
-            conn=conn,
-            type_id=2002,
-            needed_qty=10.0,
-            bp_me=0,
-            price_hub="Jita",
-            price_type="sell",
-            depth=0,
-            max_depth=5,
-            seen=set(),
-            cache={},
-        )
-        assert node.is_intermediate is False
-        assert node.blueprint_type_id == 4001
-
-
-class TestExpandBom:
-    """公开 API expand_bom"""
-
-    @patch("services.bom_expander._default_db")
-    @patch("services.bom_expander._default_pricing")
-    def test_expand_simple_item(self, mock_pricing, mock_db):
-        """展开一个无蓝图的简单物品"""
-        mock_pricing.return_value.get_price.return_value = 5.0
-
-        mock_conn = MagicMock()
-        mock_cm = MagicMock()
-        mock_cm.__enter__.return_value = mock_conn
-        mock_cm.__exit__.return_value = False
-        mock_db.return_value.connect.return_value = mock_cm
-
-        # Using type_id = 9999 (non-mineral, no blueprint)
-        mock_conn.execute.return_value.fetchone.side_effect = [
-            ("Simple", None),  # _resolve_name
-            None,  # _find_blueprint_for_product
-        ]
-
-        result = expand_bom(type_id=9999, quantity=100, bp_me=10)
-
-        assert result["tree"] is not None
-        assert result["tree"].type_id == 9999
-        assert result["full_cost"] == 500.0
-        assert result["leaf_only_cost"] == 500.0
-        assert len(result["raw_materials"]) == 1
-        assert result["raw_materials"][0]["name"] == "Simple"
-
-    @patch("services.bom_expander._default_db")
-    @patch("services.bom_expander._default_pricing")
-    def test_expand_with_blueprint(self, mock_pricing, mock_db):
-        """展开一个含蓝图的物品"""
-        mock_pricing.return_value.get_price.return_value = 1000.0
-
-        mock_conn = MagicMock()
-        mock_cm = MagicMock()
-        mock_cm.__enter__.return_value = mock_conn
-        mock_cm.__exit__.return_value = False
-        mock_db.return_value.connect.return_value = mock_cm
-
-        def execute_side_effect(sql, params=()):
-            mock_c = MagicMock()
-            if "FROM item" in sql:
-                mock_c.fetchone.return_value = ("TestItem", "TestItem")
-            elif "FROM blueprint_products" in sql:
-                if params == (2001, "manufacturing"):
-                    mock_c.fetchone.return_value = (3001, 1, 3600)
-                else:
-                    mock_c.fetchone.return_value = None
-            elif "FROM blueprint_materials" in sql:
-                if params == (3001, "manufacturing"):
-                    mock_c.fetchall.return_value = [(34, 100)]
-                else:
-                    mock_c.fetchall.return_value = []
-            else:
-                mock_c.fetchone.return_value = None
-                mock_c.fetchall.return_value = []
-            return mock_c
-
-        mock_conn.execute.side_effect = execute_side_effect
-
-        result = expand_bom(type_id=2001, quantity=1, bp_me=10)
-
-        tree = result["tree"]
-        assert tree.is_intermediate is True
-        assert len(tree.children) >= 1
-        # Type 34 is a mineral so name comes from _MINERAL_NAMES
-        assert "raw_materials" in result
-        assert "intermediates" in result
-
-    @patch("services.bom_expander._default_db")
-    @patch("services.bom_expander._default_pricing")
-    def test_get_material_tree_convenience(self, mock_pricing, mock_db):
-        """get_material_tree 返回树根节点"""
-        mock_pricing.return_value.get_price.return_value = 5.0
-        mock_conn = MagicMock()
-        mock_cm = MagicMock()
-        mock_cm.__enter__.return_value = mock_conn
-        mock_cm.__exit__.return_value = False
-        mock_db.return_value.connect.return_value = mock_cm
-        mock_conn.execute.return_value.fetchone.side_effect = [("Mineral", None), None]
-
-        tree = get_material_tree(type_id=9999, quantity=10)
-        assert isinstance(tree, BomNode)
-        assert tree.type_id == 9999
-
-    @patch("services.bom_expander._default_db")
-    @patch("services.bom_expander._default_pricing")
-    def test_get_flat_materials_convenience(self, mock_pricing, mock_db):
-        """get_flat_materials 返回扁平材料列表"""
-        mock_pricing.return_value.get_price.return_value = 5.0
-        mock_conn = MagicMock()
-        mock_cm = MagicMock()
-        mock_cm.__enter__.return_value = mock_conn
-        mock_cm.__exit__.return_value = False
-        mock_db.return_value.connect.return_value = mock_cm
-        mock_conn.execute.return_value.fetchone.side_effect = [("Mineral", None), None]
-
-        flat = get_flat_materials(type_id=9999, quantity=10)
-        assert len(flat) >= 1
-        assert flat[0]["type_id"] == 9999
+        assert [(i["type_id"], i["quantity"], i["runs"]) for i in res["intermediates"]] == [(2003, 9, 9)]
+        tree = res["tree"]
+        assert tree.is_intermediate and {c.type_id for c in tree.children} == {2003, 1001}
+        assert res["full_cost"] == 5220.0

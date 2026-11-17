@@ -296,9 +296,9 @@ def test_autofit_measures_cjk_content_not_char_count(qapp):
     widths = bridge.autofitWidths()
     assert len(widths) == model.columnCount()
 
-    # 固定窄列与产品列不参与自适应（返回 0 = 保持原值）
+    # 固定窄列不参与自适应（返回 0 = 保持原值）；产品列可拖宽后也参与自适应（BL-048）
     assert widths[COL_ICON] == 0
-    assert widths[COL_PRODUCT] == 0
+    assert widths[COL_PRODUCT] > 0
 
     # 状态列：至少要装得下「生产中」三个中文
     from PySide6.QtGui import QFont, QFontMetrics

@@ -255,7 +255,7 @@ def _turnover_series(region_id: int, days: int = _TURNOVER_DAYS) -> list[dict]:
 _PLAN_DEFAULTS: dict[str, Any] = {"runs": 1, "parallels": 1, "me": 0, "te": 0, "fac": "", "char": ""}
 
 #: 本页只做 Jita（见 `_region_id()`），计划的市场口径跟着它。
-_PLAN_HUB = "Jita"
+_PLAN_HUB = "Sobaseki"
 
 
 def _add_to_plan(type_id: int, name: str) -> None:
@@ -462,6 +462,7 @@ def _write_settings(payload: dict) -> None:
 #: **直接显示缓存、不再自动重算**；超期/缺失才由页面 `refresh()` 拉一次新数据。
 #: 「刷新指数」按钮永远 `force=True` 重算并重写缓存（见 `_on_index_refreshed`）。
 _CACHE_MAX_AGE_S = 24 * 3600
+_CACHE_VERSION = 2  # v2：篮子总数与当前合格样本数分开，旧缓存不能继续冒充完整篮子
 
 
 def _clamp_range_index(raw: Any) -> int:
@@ -507,6 +508,8 @@ def _load_cached_payload(region_id: int) -> dict:
     一旦出现新成交日（哪怕尾部残缺日），就返回空 → 页面 `refresh()` 走一次增量刷新。
     """
     cached = _read_json(_cache_path(region_id))
+    if cached.get("version") != _CACHE_VERSION:
+        return {}
     fetched = cached.get("fetched_at")
     if not isinstance(fetched, (int, float)):
         return {}
@@ -524,7 +527,9 @@ def _load_cached_payload(region_id: int) -> dict:
 def _save_cached_payload(payload: dict, region_id: int) -> None:
     """存一份本区域的 dashboard 缓存（失败只记日志：缓存坏了不该影响页面）。"""
     try:
-        _atomic_write_json(_cache_path(region_id), {"fetched_at": time.time(), "payload": payload})
+        _atomic_write_json(
+            _cache_path(region_id), {"version": _CACHE_VERSION, "fetched_at": time.time(), "payload": payload}
+        )
     except Exception:
         log.exception("写大盘页缓存失败（下次打开仍要等重算）")
 
@@ -608,7 +613,7 @@ _GUIDE_TEXT = (
     "② 哪条线明显偏离就去点它的成员表，看是谁在拉/在拖（「贡献」那一列）；\n"
     "③ 成员表与异动榜的**每一行都能点**：左键开右侧抽屉（挂单建议 + BOM 传导链），"
     "右键出菜单（复制名称 / 加入关注列表 / 加入制造列表）—— 提前备料或提前出货。\n"
-    "口径：只用 Jita 的成交均价（挂单价一个人就能推，只做供给予警）；指数 100 = 基期，"
+    "口径：只用索巴色基所在区域的成交均价（挂单价一个人就能推，只做供给予警）；指数 100 = 基期，"
     "跌 = 这一篮子东西整体变便宜。PLEX 是全服统一价，历史取自官方 Global PLEX Market "
     "（region 19000001），与另外四条的区域成交均价不是同一种口径。"
 )
@@ -622,16 +627,18 @@ _CARD_META: dict[str, tuple[str, str]] = {
         "矿物全线涨 → 采矿端紧缩或需求爆发（该抢料）；全线跌 → 上游在松，别囤料。",
     ),
     "pppi": (
-        "官方 MER 初级生产者篮子（2026-09 清单）· 成交额加权 · 30 天滚动再平衡",
-        "官方 MER PPPI 成员：矿石/冰/月矿/行星产物/发明投入品等（1,022 个 type）。它涨而 SPPI 没涨 → 冶炼与中间品在吃利润。",
+        "官方 MER 初级生产者篮子映射 · 成交额加权 · 30 天滚动再平衡",
+        "PPPI 成员：矿石/冰/月矿/行星产物/发明投入品等。本地篮子数是 SDE 映射候选数，"
+        "当前合格数才是本区域满足成交历史门槛的样本数。它涨而 SPPI 没涨 → 冶炼与中间品在吃利润。",
     ),
     "sppi": (
-        "官方 MER 次级生产者篮子（2026-09 清单）· 成交额加权 · 30 天滚动再平衡",
-        "官方 MER SPPI 成员：T2 组件、打捞物、蓝图、增效体等（3,356 个 type）。它涨得比 CPI 快 → 生产端瓶颈，该卖组件而不是卖成品。",
+        "官方 MER 次级生产者篮子映射 · 成交额加权 · 30 天滚动再平衡",
+        "SPPI 成员：T2 组件、打捞物、蓝图、增效体等。篮子候选不等于本区域当前合格样本。"
+        "它涨得比 CPI 快 → 生产端瓶颈，该卖组件而不是卖成品。",
     ),
     "cpi": (
-        "官方 MER CPI 篮子（2026-09 清单）· 成交额加权 · 30 天滚动再平衡",
-        "官方 CCP MER 消费品篮子（14,483 个 type，含舰船/模块/弹药/植入体等）。"
+        "官方 MER CPI 篮子映射 · 成交额加权 · 30 天滚动再平衡",
+        "消费品篮子含舰船/模块/弹药/植入体等；篮子候选不等于本区域当前合格样本。"
         "终端需求的温度计：成品在跌而原料没跌 → 加工利润被压缩；成品跌得比原料快 → 需求在退，别囤料、成品早出手。",
     ),
     "plex": (
@@ -647,10 +654,7 @@ _CARD_META: dict[str, tuple[str, str]] = {
 def _card_meta(key: str, members: int) -> tuple[str, str]:
     """卡片副标题（构成/口径）与「怎么看」提示；成员数塞进 N 占位（无 N 的文案原样）。"""
     subtitle, tip = _CARD_META.get(key, ("", ""))
-    if members > 0:
-        subtitle = subtitle.replace("N", str(members))
-    elif "N" in subtitle:
-        subtitle = "官方 MER CPI 篮子（成员数暂不可用）"
+    subtitle += f" · 当前合格 {members:,} 个"
     return subtitle, tip
 
 
@@ -844,7 +848,7 @@ def _status_hint(rows: list[dict], region_id: int) -> str:
         return ""
     listed = "、".join(f"{r['hub']} {r['days']} 天" for r in short)
     jita_days = next((r["days"] for r in rows if int(TRADE_HUB_IDS.get(str(r["hub"]), 0)) == region_id), 0)
-    return f"指数只用 Jita（{jita_days} 天历史）；以下中心快照太短，不参与计算：{listed}"
+    return f"指数只用索巴色基区域（{jita_days} 天历史）；以下中心快照太短，不参与计算：{listed}"
 
 
 def _turnover_text(series: list[dict], breadth: dict) -> str:
@@ -1036,6 +1040,8 @@ class MarketPulseBridge(QObject):
         self._breadth: dict = {}
         self._turnover: list[dict] = []
         self._members: list[dict] = []
+        self._member_page = 0
+        self._member_page_count = 1
         self._members_note = ""
         self._qualified: list[dict] = []
         self._market: list[dict] = []
@@ -1105,6 +1111,7 @@ class MarketPulseBridge(QObject):
         """点指数卡：选中它（成员表跟着切）；再点一次取消。"""
         key = str(key)
         self._selected_key = "" if key == self._selected_key else key
+        self._member_page = 0
         for card in self._cards:
             card["selected"] = card["key"] == self._selected_key
         self._sync_members()
@@ -1129,6 +1136,14 @@ class MarketPulseBridge(QObject):
 
     members = Property(list, lambda self: self._members, notify=dataChanged)
     membersNote = Property(str, lambda self: self._members_note, notify=dataChanged)
+    memberPage = Property(int, lambda self: self._member_page, notify=dataChanged)
+    memberPageCount = Property(int, lambda self: self._member_page_count, notify=dataChanged)
+
+    @Slot(int)
+    def setMemberPage(self, page: int) -> None:
+        self._member_page = max(0, min(int(page), self._member_page_count - 1))
+        self._sync_members()
+        self.dataChanged.emit()
 
     # ── 异动榜（两区）──────────────────────────────────────
 
@@ -1246,17 +1261,8 @@ class MarketPulseBridge(QObject):
         self.refreshStateChanged.emit()
 
     def _region_id(self) -> int:
-        """本页用的区域 —— 计划 §6 决定指数**先只做 Jita**（其余中心快照只有 5–9 天）。
-
-        取后端自己的 `JITA_RID`；服务还没落地（并行开发期）就退回
-        `core.constants.TRADE_HUB_IDS["Jita"]` —— 两者本来就是同一个 region_id。
-        """
-        try:
-            return int(_index_service().JITA_RID)
-        except Exception:
-            # 吞的是 ModuleNotFoundError（服务未落地）/ AttributeError（契约漂了）
-            log.exception("读取大盘区域 id 失败，退回 Jita")
-            return int(TRADE_HUB_IDS["Jita"])
+        """曙光市场监控按主贸易中心索巴色基的区域历史计算。"""
+        return int(TRADE_HUB_IDS["Sobaseki"])
 
     def _safe(self, what: str, load: Callable[[], Any], default: Any) -> Any:
         """跑一次后端读取；失败就退化成 `default` 并记日志。
@@ -1278,9 +1284,14 @@ class MarketPulseBridge(QObject):
         self._series_raw = list(series_raw or [])
         self._members_by_key = _members_by_key(series_raw)
         # 卡片副标题（构成 N 个成分 + 权重口径）与「怎么看」提示：成员数只有这里知道
+        by_key_raw = {item["key"]: item for item in self._series_raw}
         for card in self._cards:
+            item = by_key_raw.get(card["key"], {})
             members = self._members_by_key.get(card["key"]) or []
-            card["subtitle"], card["toolTipText"] = _card_meta(card["key"], len(members))
+            qualified = int(item.get("qualified_count", sum(float(row.get("weight") or 0) > 0 for row in members)))
+            card["subtitle"], card["toolTipText"] = _card_meta(card["key"], qualified)
+            if "basket_count" in item:
+                card["subtitle"] = f"合格 {qualified:,} / 本地篮子 {int(item['basket_count']):,} 个"
         self._rebuild_series()
         # 图例带上「现值 · 30 日涨跌」：五条线只看名字看不出各自在什么水平
         by_key = {card["key"]: card for card in self._cards}
@@ -1347,14 +1358,26 @@ class MarketPulseBridge(QObject):
         """成员表按**选中**的指数取；没选中就默认第一条（否则一进页面是一张空表）。"""
         key = self._selected_key or (self._cards[0]["key"] if self._cards else "")
         raw = self._members_by_key.get(key, [])
-        self._members = [_member_view(row) for row in raw[:_MEMBER_CAP]]
+        self._member_page_count = max(1, (len(raw) + _MEMBER_CAP - 1) // _MEMBER_CAP)
+        self._member_page = min(self._member_page, self._member_page_count - 1)
+        start = self._member_page * _MEMBER_CAP
+        self._members = [_member_view(row) for row in raw[start : start + _MEMBER_CAP]]
         label = next((card["label"] for card in self._cards if card["key"] == key), key)
         if not raw:
             self._members_note = f"{label}：暂无成分数据（先在顶栏「更新价格」补齐成交均价历史）"
         elif len(raw) > _MEMBER_CAP:
-            self._members_note = f"{label}：按权重显示前 {_MEMBER_CAP} 个，共 {len(raw)} 个成分"
+            self._members_note = (
+                f"{label}：按权重显示 {start + 1}–{min(start + _MEMBER_CAP, len(raw))} / {len(raw)} 个成分"
+            )
         else:
             self._members_note = f"{label}：{len(raw)} 个成分"
+        item = next((item for item in self._series_raw if item.get("key") == key), {})
+        if "basket_count" in item:
+            self._members_note += (
+                f" · 本地篮子 {int(item['basket_count']):,} / 合格 {int(item.get('qualified_count', 0)):,}"
+                f" · 权重日期 {item.get('member_date') or _DASH}"
+                "（未达近30天成交额>0且覆盖≥5天的成员不计权重）"
+            )
 
     def _index_chg_pct(self) -> float | None:
         """量价背离要用的「指数涨跌」：选中那张卡用它的今日涨跌，没选就取五条线的均值。"""

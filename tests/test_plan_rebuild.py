@@ -501,3 +501,32 @@ def test_deposit_backfill_skips_locked_and_keeps_manual(temp_db, monkeypatch):
     c.plan_repo.update(kid["id"], deposit_hangar_id=99)
     plan_rebuild.rebuild_children(create=True, prune=True)
     assert _child_rows(temp_db)[0]["deposit_hangar_id"] == 99
+
+
+def test_child_demand_uses_hangar_saving_and_parallel_lines(temp_db, monkeypatch):
+    """BL-052-1/6：子项需求 ① 乘母项材料机库的建筑材料倍率（与启动闸门同源），
+    ② 中间件按 **每条线轮数 × 并行线** 展开下级（以前只按一条线，并行 > 1 时孙项少算）。
+
+    母项 2001 × 100 轮在莱塔卢（材料 ×0.99）：2003 需 ceil(5 × 100 × 0.99) = 495（旧：500）；
+    2003 排成 5 线 × 99 轮，每条线吃 ceil(round(2 × 99 × 0.99, 2)) = 197 个 2004 → 共 985
+    （旧：不乘倍率且只算 1 条线 = 198）。
+    """
+    from services import hangar_industry_config
+
+    c = _test_setup(temp_db, monkeypatch)
+    _seed_third_level(temp_db)
+    monkeypatch.setattr(hangar_industry_config, "_default_db", lambda: temp_db)
+    hangar = inventory_manager.create_hangar("莱塔卢")
+    with temp_db.connect("user") as conn:
+        conn.execute("UPDATE hangars SET facility_type='raitaru' WHERE id=?", (hangar,))
+    _insert_mother(c.plan_repo, 2001, runs=100, group=1, mat_hangar_id=hangar)
+
+    plan_rebuild.rebuild_children(create=True, prune=True)
+    kid = {k["product_type_id"]: k for k in _child_rows(temp_db)}[2003]
+    assert kid["demand"] == 495
+    c.plan_repo.update(kid["id"], parallels=5)
+    plan_rebuild.rebuild_children()
+
+    kids = {k["product_type_id"]: k for k in _child_rows(temp_db)}
+    assert (kids[2003]["parallels"], kids[2003]["runs"]) == (5, 99)
+    assert kids[2004]["demand"] == 5 * 197

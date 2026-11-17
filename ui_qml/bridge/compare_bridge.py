@@ -33,6 +33,7 @@ from PySide6.QtGui import QGuiApplication
 from core.constants import TRADE_HUBS
 from core.logger import log
 from services import char_config_resolver
+from services.name_resolver import hub_options
 from ui_qml.dialog_host import DialogBridge, QmlDialog
 from ui_qml.models.compare_models import _format_isk
 from ui_qml.models.compare_qml_model import CompareQmlModel
@@ -110,7 +111,7 @@ class CompareBridge(DialogBridge):
 
     @Property(list, constant=True)
     def hubs(self) -> list[str]:
-        return list(_HUBS)
+        return [item["label"] for item in hub_options(_HUBS)]
 
     @Property(list, constant=True)
     def characters(self) -> list[str]:

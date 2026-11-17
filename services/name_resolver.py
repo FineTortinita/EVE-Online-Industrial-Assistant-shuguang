@@ -288,6 +288,11 @@ def resolve_system_names_batch(
     return result
 
 
+def hub_options(hubs: list[str]) -> list[dict]:
+    """贸易中心下拉项：显示中文（术语表），值保持英文 hub 键供取价使用。"""
+    return [{"label": term.system_name(h) or h, "value": h} for h in hubs]
+
+
 def resolve_system_display_names_batch(solar_system_ids: list[int]) -> dict[int, str]:
     """批量查询星系显示名；异常返回空 dict。"""
     if not solar_system_ids:

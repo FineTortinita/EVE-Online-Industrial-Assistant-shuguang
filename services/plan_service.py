@@ -129,8 +129,8 @@ def insert_plans_batch(rows: list[dict], *, auto_bind: bool = True) -> list[int]
                 "mat_hub, sell_hub, facility, char_name, status, "
                 "profit, margin, score, iskph, material_cost, "
                 "calculated_time, daily_output, created_at, deposit_hangar_id, mat_hangar_id, solar_system_id, "
-                "materials_ready) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,'pending',?,?,?,?,?,?,?,?,?,?,?,1)",
+                "materials_ready, activity) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,'pending',?,?,?,?,?,?,?,?,?,?,?,1,?)",
                 (
                     r["type_id"],
                     r.get("product_name", ""),
@@ -153,6 +153,7 @@ def insert_plans_batch(rows: list[dict], *, auto_bind: bool = True) -> list[int]
                     r.get("deposit_hangar_id"),
                     r.get("mat_hangar_id"),
                     r.get("solar_system_id"),
+                    r.get("activity") or "manufacturing",
                 ),
             )
             rowid = cur.lastrowid
@@ -355,7 +356,7 @@ def _fetch_rows(where_sql: str = "", params: tuple = ()) -> list[dict]:
 
 def _make_cost_hub(row: dict, ps: dict) -> str:
     """本行「自制成本」用的材料 Hub（行自己的 > 全局设置 > Jita）。"""
-    return str(row.get("mat_hub") or ps.get("mat_hub") or "Jita")
+    return str(row.get("mat_hub") or ps.get("mat_hub") or "Sobaseki")
 
 
 def _make_cost_hangar(row: dict) -> int:

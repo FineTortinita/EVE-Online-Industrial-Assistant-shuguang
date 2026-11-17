@@ -352,3 +352,51 @@ def _format_blueprint_duration(conn, blueprint_type_id) -> str:
     days, rem = divmod(secs, 86400)
     hours, rem = divmod(rem, 3600)
     return f"{days}d {hours}h" if days else f"{hours}h"
+
+
+def get_fill_sheet(db) -> list[dict[str, Any]]:
+    """填料总表（T2 式，阶段 4a）：按材料机库分组的备料占用汇总。
+
+    → `[{hangar_id, hangar_name, rows: [{type_id, name, need, stock, frozen, coming, short, state}]}]`
+    `state`：`ready` 现有（库存 + 冻结）够 / `coming` 加上子项将产出够 / `short` 仍缺。
+    分配口径见 `domain.reservation`（组号升序 → 子级降序；只从本机库取）。
+    """
+    from domain.reservation import summarize
+    from services.inventory_manager import get_hangar_name
+    from services.name_resolver import resolve_item_name
+    from services.plan_aggregator import compute_reservations
+
+    with db.connect("user") as conn:
+        cur = conn.execute(
+            f"SELECT * FROM production_plans WHERE status IN ({','.join('?' for _ in PLAN_ACTIVE_STATUSES)}) "
+            "OR (sub_level > 0 AND status IN ('completed', 'done'))",
+            PLAN_ACTIVE_STATUSES,
+        )
+        cols = [d[0] for d in cur.description]
+        rows = [dict(zip(cols, r, strict=False)) for r in cur.fetchall()]
+    if not rows:
+        return []
+    with db.connect("user", "ref", "bp", "mkt") as conn:
+        res = compute_reservations(conn, rows)
+        by_hangar = summarize(res["alloc"], res["hangar_of"])
+        out: list[dict[str, Any]] = []
+        for hid, per in sorted(by_hangar.items(), key=lambda kv: (kv[0] is None, kv[0] or 0)):
+            items = []
+            for tid, a in per.items():
+                items.append(
+                    {
+                        "type_id": tid,
+                        "name": resolve_item_name(conn, tid),
+                        "need": a.need,
+                        "stock": a.taken.get("stock", 0),
+                        "frozen": a.taken.get("frozen", 0),
+                        "coming": a.taken.get("child_running", 0) + a.taken.get("child_planned", 0),
+                        "short": a.short,
+                        "state": a.state,
+                    }
+                )
+            order = {"short": 0, "coming": 1, "ready": 2}
+            items.sort(key=lambda x: (order[str(x["state"])], x["name"]))
+            name = get_hangar_name(hid) if hid else "（未设材料机库）"
+            out.append({"hangar_id": hid, "hangar_name": name, "rows": items})
+    return out

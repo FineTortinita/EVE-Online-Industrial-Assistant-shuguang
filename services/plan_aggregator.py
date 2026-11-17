@@ -25,8 +25,8 @@ import math
 from typing import Any
 
 from core.logger import log
-from domain.bom import walk_bom
 from domain.formulas import calc_material_for_runs
+from domain.industry_calc import Target, calculate
 from domain.research import (
     ACTIVITY_COPYING,
     ACTIVITY_INVENTION,
@@ -522,26 +522,27 @@ def calculate_output_with_overflow(
         plan_value = plan_price * total_qty
         status = plan.get("status", "pending")
 
-        # 递归 BOM 查找中间产品溢出（全局 seen：共享中间产品只计一次）
+        # 中间产品溢出：走统一引擎（`domain.industry_calc`）按本计划单独展开 —— 共享中间件合并取整一次，
+        # 只看真的会被自制（存在子项产线）的件；纯采购的件买多少用多少，永远不溢出。
         overflow_details: list[dict] = []
-        reader = SqliteBlueprintReader(conn)
-        for step in walk_bom(reader, pid, total_qty, me_level=me, max_depth=max_depth, seen_mode="global"):
-            if step.blueprint is None:
-                continue  # 叶子（无蓝图 / 环 / 深度封顶）→ 无溢出
-            if step.type_id not in self_made:
-                continue  # 没有子项产线 → 这件是买来的，不判溢出
-            per_run_out = step.blueprint[1]
-            overflow = step.runs * per_run_out - step.qty
-            if overflow > 0:
+        made = calculate(
+            SqliteBlueprintReader(conn),
+            [Target(int(pid), quantity=int(total_qty), me_level=int(me), key=pid)],
+            build=lambda tid, act: act == ACTIVITY_MANUFACTURING and tid in self_made,
+            me_for=lambda *_, _me=int(me): _me,
+            max_depth=max_depth,
+        )
+        for node in sorted(made.nodes.values(), key=lambda n: (n.depth, n.type_id)):
+            if node.leftover > 0:
                 overflow_details.append(
                     {
-                        "type_id": step.type_id,
-                        "name": _resolve_name(conn, step.type_id),
-                        "needed": step.qty,
-                        "per_run": per_run_out,
-                        "runs": step.runs,
-                        "produced": step.runs * per_run_out,
-                        "overflow": overflow,
+                        "type_id": node.type_id,
+                        "name": _resolve_name(conn, node.type_id),
+                        "needed": node.demand,
+                        "per_run": node.output_qty,
+                        "runs": node.runs,
+                        "produced": node.produced,
+                        "overflow": node.leftover,
                     }
                 )
         overflow_text = _format_overflow(overflow_details)
@@ -646,7 +647,9 @@ def _plan_total_runs(plan: dict) -> int:
     return max(int(plan.get("runs") or 0), 0) * max(int(plan.get("parallels") or 1), 1)
 
 
-def _manufacturing_need(qty: int, wastefactor: int, me_level: int, runs: int, parallels: int) -> int:
+def _manufacturing_need(
+    qty: int, wastefactor: int, me_level: int, runs: int, parallels: int, mat_saving: float = 1.0
+) -> int:
     """一条制造配方的采购/校验需求 = **逐线各自整批取整再求和**。
 
     每条并行线在 EVE 里是**独立作业**（一条线一张蓝图），取整只作用于单个作业：
@@ -657,8 +660,11 @@ def _manufacturing_need(qty: int, wastefactor: int, me_level: int, runs: int, pa
     **少要货**（实测计划 477「咒逐级」runs=1/parallels=6/ME3：聚变推进器整批 175、
     逐线 30×6=180；按 175 采购后逐条启动，第 6 条误报缺 5（25/30）。同一批受影响的
     还有 线性护盾 88→90、纳米电子 961→966、超立方 350→354）。
+
+    `mat_saving` = 该计划材料机库的建筑 × 改装件 × 安等倍率（`manufacturing_mat_saving`），
+    与启动闸门同源；以前不乘它，采购清单按 NPC 口径多报（BL-052-1）。
     """
-    return calc_material_for_runs(qty, wastefactor, me_level, max(1, int(runs))) * max(1, int(parallels))
+    return calc_material_for_runs(qty, wastefactor, me_level, max(1, int(runs)), mat_saving) * max(1, int(parallels))
 
 
 def _science_material_requirements(plan: dict) -> list[dict]:
@@ -687,6 +693,34 @@ def _cache_item_meta(conn, mid: int, names: dict, volumes: dict, zh_en: dict) ->
     zh_en[mid] = (r[0], r[1]) if r else (None, None)
     names[mid] = _resolve_name(conn, mid)
     volumes[mid] = float(r[2]) if r and r[2] else 0.0
+
+
+def _plan_mat_saving(plan: dict, cache: dict[tuple[int, int], float], activity: str = ACTIVITY_MANUFACTURING) -> float:
+    """计划材料机库对该产物的材料倍率（制造 / 反应各按自己的建筑与改装件）；无机库 → 1.0。"""
+    from services.hangar_industry_config import manufacturing_mat_saving, reaction_mat_saving
+
+    pid = int(plan.get("product_type_id") or 0)
+    if activity == ACTIVITY_REACTION:
+        return reaction_mat_saving(plan.get("mat_hangar_id"), pid, cache=cache)
+    return manufacturing_mat_saving(plan.get("mat_hangar_id"), pid, cache=cache)
+
+
+def _plan_recipe(conn, plan: dict, pid: int) -> tuple[list[tuple[int, int, int]], str] | None:
+    """计划自己那张配方的材料 → ([(材料, 基础量, wastefactor)], 活动)；查不到 → None。
+
+    反应计划（`activity='reaction'`）取反应配方；以前这里只认制造配方，反应计划整行进不了
+    待采购 / 填料总表（BL-052 D5）。
+    """
+    act = ACTIVITY_REACTION if normalize(plan.get("activity")) == ACTIVITY_REACTION else ACTIVITY_MANUFACTURING
+    bp = get_blueprint_products(conn, pid, act)
+    if not bp:
+        return None
+    mats = conn.execute(
+        "SELECT material_type_id, quantity, COALESCE(wastefactor,10) FROM blueprint_materials "
+        "WHERE blueprint_type_id=? AND activity=?",
+        (bp[0], act),
+    ).fetchall()
+    return [(int(m), int(q), int(w)) for m, q, w in mats], act
 
 
 def aggregate_procurement(
@@ -730,6 +764,7 @@ def aggregate_procurement(
     # 1. 每个计划取直接材料；由子项产线自制的组件排除（其原材料由子线计划计入）。
     #    未拆解的组件 / 子线被删后 → 回到待采购。
     sub_prod_ids = self_made_type_ids(plans) if self_made is None else {int(t) for t in self_made}
+    saving_cache: dict[tuple[int, int], float] = {}
     group_need: dict[int | None, dict[int, float]] = {}
     names: dict[int, str] = {}
     volumes: dict[int, float] = {}
@@ -761,19 +796,17 @@ def aggregate_procurement(
         me = int(plan.get("me_level") or 0)
         runs = max(int(plan.get("runs") or 0), 0)
         parallels = max(int(plan.get("parallels") or 1), 1)
-        bp = get_blueprint_products(conn, pid, ACTIVITY_MANUFACTURING)
-        if not bp:
+        recipe = _plan_recipe(conn, plan, pid)
+        if recipe is None:
             continue
-        mats = conn.execute(
-            "SELECT material_type_id, quantity, COALESCE(wastefactor,10) FROM blueprint_materials "
-            "WHERE blueprint_type_id=? AND activity='manufacturing'",
-            (bp[0],),
-        ).fetchall()
+        mats, act = recipe
+        if act == ACTIVITY_REACTION:
+            me = 0  # 反应没有材料效率
         for mid, qty, wf in mats:
             if mid in sub_prod_ids:
                 continue  # 自制组件：由子项产线覆盖，买其原材料（子线计划已计入）
             # 逐线（逐作业）取整再求和：与启动闸门 `material_requirements` 同口径
-            need = _manufacturing_need(qty, wf, me, runs, parallels)
+            need = _manufacturing_need(qty, wf, me, runs, parallels, _plan_mat_saving(plan, saving_cache, act))
             bucket[mid] = bucket.get(mid, 0.0) + float(need)
             _cache_item_meta(conn, mid, names, volumes, zh_en)
 
@@ -889,6 +922,7 @@ def collect_direct_materials(conn, plans: list[dict]) -> dict[int, dict]:
         if p.get("product_type_id") and int(p.get("child_level") or p.get("sub_level") or 0) > 0
     }
     result: dict[int, dict] = {}
+    saving_cache: dict[tuple[int, int], float] = {}
     for plan in plans:
         if is_science(plan.get("activity")):
             if _plan_total_runs(plan) <= 0:
@@ -912,21 +946,143 @@ def collect_direct_materials(conn, plans: list[dict]) -> dict[int, dict]:
         me = int(plan.get("me_level") or 0)
         runs = max(int(plan.get("runs") or 0), 0)
         parallels = max(int(plan.get("parallels") or 1), 1)
-        bp = get_blueprint_products(conn, pid, ACTIVITY_MANUFACTURING)
-        if not bp:
+        recipe = _plan_recipe(conn, plan, pid)
+        if recipe is None:
             continue
-        mats = conn.execute(
-            "SELECT material_type_id, quantity, COALESCE(wastefactor,10) FROM blueprint_materials "
-            "WHERE blueprint_type_id=? AND activity='manufacturing'",
-            (bp[0],),
-        ).fetchall()
+        mats, act = recipe
+        if act == ACTIVITY_REACTION:
+            me = 0  # 反应没有材料效率
         for mid, qty, wf in mats:
             if mid in sub_prod_ids:
                 continue  # 自制组件：由子项产线覆盖，买其原材料（子线计划已计入）
             # 逐线（逐作业）取整再求和：与 aggregate_procurement / 启动闸门同口径
-            need = _manufacturing_need(qty, wf, me, runs, parallels)
+            need = _manufacturing_need(qty, wf, me, runs, parallels, _plan_mat_saving(plan, saving_cache, act))
             entry = result.get(mid)
             if entry is None:
                 entry = result[mid] = _item_meta_entry(conn, mid)
             entry["total_qty"] += need
     return result
+
+
+# ════════════════════════════════════════════════════════════════
+#  备料占用（T2 式预定，重构阶段 4）
+# ════════════════════════════════════════════════════════════════
+
+
+def plan_direct_needs(conn, plan: dict, saving_cache: dict[tuple[int, int], float]) -> dict[int, int]:
+    """单个计划的直接材料需求 `{type_id: 量}`（**含**自制中间件 —— 占用分配要知道子项产出顶掉了多少）。
+
+    口径与 `collect_direct_materials` 一致（逐线整批取整 × 并行、设施材料倍率、反应无 ME、科研走启动闸门同一路径），
+    区别只在不排除子项产物。
+    """
+    if _plan_total_runs(plan) <= 0:
+        return {}
+    if is_science(plan.get("activity")):
+        return {int(r["type_id"]): int(r.get("need") or 0) for r in _science_material_requirements(plan)}
+    pid = plan.get("product_type_id")
+    recipe = _plan_recipe(conn, plan, int(pid)) if pid else None
+    if recipe is None:
+        return {}
+    mats, act = recipe
+    me = 0 if act == ACTIVITY_REACTION else int(plan.get("me_level") or 0)
+    runs = max(int(plan.get("runs") or 0), 0)
+    parallels = max(int(plan.get("parallels") or 1), 1)
+    saving = _plan_mat_saving(plan, saving_cache, act)
+    out: dict[int, int] = {}
+    for mid, qty, wf in mats:
+        out[int(mid)] = out.get(int(mid), 0) + int(_manufacturing_need(qty, wf, me, runs, parallels, saving))
+    return out
+
+
+def compute_reservations(conn, rows: list[dict]) -> dict[str, Any]:
+    """全量计划行 → 备料占用分配（不落库，每次刷新重算）。
+
+    参与者 = 勾了「备料」（`materials_ready`）的**待生产**行；子项产出按引用母项所在组记：
+    在产（in_progress/running/ready）子项将产出、计划中（pending）子项将产出、已完成子项已入库的产出（冻结，计算口径）。
+    Returns: {"alloc": {plan_id: {type_id: Allocation}}, "hangar_of": {plan_id: hangar_id}}
+    """
+    from core.constants import PLAN_LOCKED_STATUSES, PLAN_STATUS_PENDING
+    from domain.reservation import PlanNeed, allocate
+    from services import inventory_manager
+
+    def group_of(r: dict) -> int:
+        return int(r.get("group_number") or r.get("group_id") or 0)
+
+    def level_of(r: dict) -> int:
+        return int(r.get("sub_level") or r.get("child_level") or 0)
+
+    def output_of(r: dict) -> int:
+        act = ACTIVITY_REACTION if normalize(r.get("activity")) == ACTIVITY_REACTION else ACTIVITY_MANUFACTURING
+        bp = get_blueprint_products(conn, int(r["product_type_id"]), act)
+        per = max(int(bp[1] or 1), 1) if bp else 1
+        return max(int(r.get("runs") or 0), 0) * max(int(r.get("parallels") or 1), 1) * per
+
+    by_id = {int(r["id"]): r for r in rows if r.get("id")}
+
+    def pool_key(groups: set[int]) -> int | tuple[int, ...]:
+        """一份子项产出只进一个池：单组用组号，跨组共享用组号元组（`allocate` 按组号顺序先到先得）。"""
+        return next(iter(groups)) if len(groups) == 1 else tuple(sorted(groups))
+
+    def groups_for(child: dict) -> set[int]:
+        """子项产出给哪些组：引用它的母项（`source_mother_ids`，跨组共享件也算）所在组；无来源记录按自身组号。"""
+        refs = [by_id.get(int(x)) for x in str(child.get("source_mother_ids") or "").split(",") if x.strip().isdigit()]
+        gs = {group_of(m) for m in refs if m}
+        return gs or {group_of(child)}
+
+    running: dict[int | tuple[int, ...], dict[int, int]] = {}
+    planned: dict[int | tuple[int, ...], dict[int, int]] = {}
+    frozen: dict[int | tuple[int, ...], dict[int, int]] = {}
+    #: 冻结 = 已完成子项**已入库**的产出：计算口径（不落库，阶段 4b 才做物理冻结）。
+    #: 从共享库存池先扣出来，只给引用它的母项所在组，避免低组号的别组先占走。
+    frozen_by_hangar: dict[int, dict[int, int]] = {}
+    for r in rows:
+        if level_of(r) <= 0 or not r.get("product_type_id") or is_science(r.get("activity")):
+            continue
+        status = (r.get("status") or "").lower()
+        tid = int(r["product_type_id"])
+        if status in PLAN_LOCKED_STATUSES:
+            bucket = running
+        elif status == PLAN_STATUS_PENDING:
+            bucket = planned
+        else:
+            # 已完成：只有仍有活跃母项引用、且产出落在某个母项材料机库里时才算冻结
+            mothers = [
+                by_id.get(int(x)) for x in str(r.get("source_mother_ids") or "").split(",") if x.strip().isdigit()
+            ]
+            active = [m for m in mothers if m and (m.get("status") or "").lower() == PLAN_STATUS_PENDING]
+            hangar = r.get("deposit_hangar_id")
+            if not active or not hangar or int(hangar) not in {int(m.get("mat_hangar_id") or 0) for m in active}:
+                continue
+            fq = frozen_by_hangar.setdefault(int(hangar), {})
+            fq[tid] = fq.get(tid, 0) + output_of(r)
+            fz = frozen.setdefault(pool_key({group_of(m) for m in active}), {})
+            fz[tid] = fz.get(tid, 0) + output_of(r)
+            continue
+        qty = output_of(r)
+        if qty > 0:
+            pq = bucket.setdefault(pool_key(groups_for(r)), {})
+            pq[tid] = pq.get(tid, 0) + qty
+
+    saving_cache: dict[tuple[int, int], float] = {}
+    needs: list[PlanNeed] = []
+    hangar_of: dict[int, int | None] = {}
+    for r in rows:
+        if (r.get("status") or "").lower() != PLAN_STATUS_PENDING or not r.get("materials_ready"):
+            continue
+        hid = int(r["mat_hangar_id"]) if r.get("mat_hangar_id") else None
+        hangar_of[int(r["id"])] = hid
+        needs.append(PlanNeed(int(r["id"]), group_of(r), level_of(r), hid, plan_direct_needs(conn, r, saving_cache)))
+    stock: dict[int | None, dict[int, int]] = {
+        h: dict(inventory_manager.get_hangar_stock(h)) for h in {n.hangar_id for n in needs} if h
+    }
+    # 冻结量以「机库里实际还有多少」为上限，并从共享池扣掉（同一份货不能既冻结又闲置）
+    for per in frozen.values():
+        for tid in list(per):
+            avail = sum(stock.get(h, {}).get(tid, 0) for h in frozen_by_hangar if tid in frozen_by_hangar[h])
+            per[tid] = min(per[tid], avail)
+    for h, per in frozen_by_hangar.items():
+        if h in stock:
+            for tid, q in per.items():
+                stock[h][tid] = max(0, stock[h].get(tid, 0) - q)
+    alloc = allocate(needs, stock, child_running=running, frozen=frozen, child_planned=planned)
+    return {"alloc": alloc, "hangar_of": hangar_of}

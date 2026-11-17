@@ -35,6 +35,7 @@ from core.constants import TRADE_HUBS
 from core.container import get_container
 from core.logger import log
 from services import char_config_resolver
+from services.name_resolver import hub_options
 from ui_qml.dialog_host import DialogBridge, QmlDialog
 from ui_qml.icon_cache import icon_url as _icon_url
 
@@ -100,8 +101,8 @@ class ScoreParamsBridge(DialogBridge):
         prefix: str,
         *,
         type_id: int | None = None,
-        hub: str = "Jita",
-        sell_hub: str = "Jita",
+        hub: str = "Sobaseki",
+        sell_hub: str = "Sobaseki",
         buy_side: str = "sell",
         sell_side: str = "sell",
         char: str = "main",
@@ -138,7 +139,7 @@ class ScoreParamsBridge(DialogBridge):
 
     @Property(list, constant=True)
     def hubs(self) -> list[str]:
-        return list(_REGIONS)
+        return [item["label"] for item in hub_options(_REGIONS)]
 
     @Property(list, constant=True)
     def sides(self) -> list[str]:
@@ -248,7 +249,7 @@ class MfgQmlDialog(QmlDialog):
             "制造评分设置",
             "制造评分",
             type_id=type_id,
-            hub=cur.get("hub", "Jita"),
+            hub=cur.get("hub", "Sobaseki"),
             char=cur.get("char", "main"),
             tax=cur.get("tax", 0),
         )
@@ -269,8 +270,8 @@ class TradeQmlDialog(QmlDialog):
             "贸易评分设置",
             "贸易评分",
             type_id=type_id,
-            hub=cur.get("bh", "Jita"),
-            sell_hub=cur.get("sh", "Jita"),
+            hub=cur.get("bh", "Sobaseki"),
+            sell_hub=cur.get("sh", "Sobaseki"),
             buy_side=cur.get("bs", "sell"),
             sell_side=cur.get("ss", "sell"),
             char=cur.get("char", "main"),

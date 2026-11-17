@@ -202,7 +202,7 @@ async def test_single_failure_is_isolated():
     inserted = [row for call in h.db.executemany.await_args_list for row in call.args[1]]
     assert len(inserted) == len(getprices.TRADE_REGIONS)
     assert {row[1] for row in inserted} == {rid for _, rid in getprices.TRADE_REGIONS}
-    assert inserted[0][:8] == (1, _REGION, "2026-09-30", 5.5, 6.0, 5.0, 120, 8)
+    assert inserted[0][:8] == (1, getprices.TRADE_REGIONS[0][1], "2026-09-30", 5.5, 6.0, 5.0, 120, 8)
     assert inserted[0][8], "fetched_at 必须写入 —— 下一轮的 TTL 判定靠它"
     assert progress == [(100, f"拉取市场历史 {expected_requests}/{expected_requests}")]
 

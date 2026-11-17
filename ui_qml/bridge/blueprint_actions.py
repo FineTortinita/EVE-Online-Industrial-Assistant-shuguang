@@ -428,7 +428,7 @@ def paste_blueprints(bridge: Any, hangar_id: int | None, hangar_label: str) -> N
     clipboard = QApplication.clipboard()
     raw = clipboard.text().strip() if clipboard is not None else ""
     if not raw:
-        bridge._set_bp_hint("剪贴板为空，请先在游戏中复制蓝图（Ctrl+C）")
+        bridge._set_bp_hint("剪贴板为空，请先从游戏内制造页面复制蓝图（Ctrl+C）")
         return
 
     before_map = snapshot_blueprints(hangar_id)
@@ -436,6 +436,9 @@ def paste_blueprints(bridge: Any, hangar_id: int | None, hangar_label: str) -> N
 
     def _on_ready(diff: list, worker: Any) -> None:
         bridge._import_worker = None
+        if worker.error_message:
+            bridge._set_bp_hint(worker.error_message)
+            return
         if not diff:
             bridge._set_bp_hint(
                 f"剪贴板中 {worker.filtered_count} 行是材料、{worker.unresolved_count} 行认不出对应蓝图；已全部跳过"

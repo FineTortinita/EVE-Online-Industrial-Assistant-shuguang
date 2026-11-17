@@ -58,6 +58,7 @@ from services.inventory_manager import (
     get_production_state_flags,
     get_stock_and_order_flags,
 )
+from services.name_resolver import hub_options
 from services.price_history import get_history_summary
 from ui_qml.bridge.all_items_bridge import (
     drop_worker,
@@ -273,7 +274,7 @@ class ManufacturableItemsBridge(DialogBridge):
         self._data: list[dict] = []
         self._filt: list[dict] = []
         self._view: list[dict] = []
-        self._mfg: dict[str, Any] = {"hub": "Jita", "char": "main", "tax": 0}
+        self._mfg: dict[str, Any] = {"hub": "Sobaseki", "char": "main", "tax": 0}
         #: 筛选器：类别 + 库存/挂单 + 日销量 + 利润率下限（空 = 不筛）。
         #: **要在 `_load_settings()` 之前给默认值** —— 落盘里存着上次的选择（用户要求
         #: 「筛选项能保存，不要每次都去设置」）。
@@ -284,7 +285,7 @@ class ManufacturableItemsBridge(DialogBridge):
         self._load_settings()
 
         self._characters: list[str] = _character_names()
-        self._hub_index = _combo_index(list(TRADE_HUBS), str(self._mfg.get("hub", "Jita")))
+        self._hub_index = _combo_index(list(TRADE_HUBS), str(self._mfg.get("hub", "Sobaseki")))
         self._char_index = _combo_index(self._characters, str(self._mfg.get("char", "main")))
         #: 落盘值以「下拉里真实存在的项」为准（配置里的区域/人物被改名后要退回首项）
         self._mfg["hub"] = list(TRADE_HUBS)[self._hub_index]
@@ -370,7 +371,7 @@ class ManufacturableItemsBridge(DialogBridge):
     emptyText = Property(str, lambda self: self._empty_text, notify=stateChanged)
 
     #: 内联评分设置（原先在「设置」二级对话框里）
-    hubs = Property(list, lambda self: list(TRADE_HUBS), constant=True)
+    hubs = Property(list, lambda self: [item["label"] for item in hub_options(TRADE_HUBS)], constant=True)
     characters = Property(list, lambda self: self._characters, constant=True)
     hubIndex = Property(int, lambda self: self._hub_index, notify=stateChanged)
     charIndex = Property(int, lambda self: self._char_index, notify=stateChanged)

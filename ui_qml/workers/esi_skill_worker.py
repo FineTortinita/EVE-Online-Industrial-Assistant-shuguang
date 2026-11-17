@@ -65,6 +65,10 @@ SCOPES = (
     "esi-clones.read_implants.v1",
     "esi-wallet.read_character_wallet.v1",
     "esi-markets.read_character_orders.v1",
+    # 重构阶段 6（2026-11-17 用户实测曙光公共客户端放行）：资产同步 + 进行中工业作业对账。
+    # 蓝图 `esi-characters.read_blueprints.v1` 实测 `invalid_scope`，**不能**加进来（会让整条授权失败）。
+    "esi-assets.read_assets.v1",
+    "esi-industry.read_character_jobs.v1",
 )
 
 #: 可选能力「含军团钱包」要的 scope，**不进 `SCOPES`**（见 `_extra_scopes`）。

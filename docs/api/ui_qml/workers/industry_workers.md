@@ -81,7 +81,7 @@ def _compute(self) -> dict
 ##### `__init__`
 
 ```python
-def __init__(self, plans: list[dict], char_config: dict, parent=None, char_name: str | None=None, mat_hub: str='Jita', mat_price_type: str='sell', prod_hub: str='Jita', prod_price_type: str='sell', mat_mult: float=1.0, prod_mult: float=1.0)
+def __init__(self, plans: list[dict], char_config: dict, parent=None, char_name: str | None=None, mat_hub: str='Sobaseki', mat_price_type: str='sell', prod_hub: str='Sobaseki', prod_price_type: str='sell', mat_mult: float=1.0, prod_mult: float=1.0)
 ```
 
 ::: warning ⚠️ 待补 docstring

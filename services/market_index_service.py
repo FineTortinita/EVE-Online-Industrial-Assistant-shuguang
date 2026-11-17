@@ -88,12 +88,14 @@ from collections.abc import Hashable, Iterable, Mapping, Sequence
 from datetime import date, timedelta
 from typing import Any, NamedTuple, cast
 
+from core.constants import TRADE_HUB_IDS
 from services.database_manager import get_db
 
 log = logging.getLogger(__name__)
 
-#: Jita（The Forge）—— 目前唯一历史天数够长的中心（计划 §6 风险表）
+#: 保留显式吉他区域供调用方选择；曙光默认按主贸易中心索巴色基计算。
 JITA_RID = 10000002
+DEFAULT_REGION_ID = TRADE_HUB_IDS["Sobaseki"]
 
 #: 进程内短 TTL 缓存（秒）。切页/重开大盘时同一 (区域, keys, 锚定日) 直接返回深拷贝，
 #: 不再重算「官方成员表 + 74 万行观测装载 + 逐成员价格/涨幅」；`refresh_index_daily()`
@@ -959,7 +961,7 @@ def _last_history_day(conn_mgr, region_id: int) -> date | None:
     return date.fromisoformat(best) if best else None
 
 
-def latest_price_day(region_id: int = JITA_RID, _db=None) -> str | None:
+def latest_price_day(region_id: int = DEFAULT_REGION_ID, _db=None) -> str | None:
     """`price_history` / 全服价的最新日期（**不做覆盖度校验**，~ms）。
 
     仅供桥层判断「磁盘缓存是否已经跨了交易日」：同一天重复打开可继续用 payload 文件；
@@ -1421,7 +1423,7 @@ def clear_index_memory_cache() -> None:
         _INDEX_MEMO.clear()
 
 
-def refresh_index_daily(region_id: int = JITA_RID) -> int:
+def refresh_index_daily(region_id: int = DEFAULT_REGION_ID) -> int:
     """重建 `market.db.market_index_daily`（五个指数逐日点位），返回写入行数。
 
     成功重建后清空进程内指数缓存：物化点位已换新，旧缓存必须立即失效（不能等 TTL）。
@@ -1544,12 +1546,15 @@ def _series_from_points(
                 "label": INDEX_LABELS[key],
                 "points": [{"date": str(p["date"]), "value": float(p["value"])} for p in (points_map.get(key) or [])],
                 "members": members_out,
+                "basket_count": len(member_sets[key]),
+                "qualified_count": len(weights),
+                "member_date": anchor.isoformat() if anchor is not None else None,
             }
         )
     return out
 
 
-def get_index_cards(region_id: int = JITA_RID, _db=None) -> list[dict]:
+def get_index_cards(region_id: int = DEFAULT_REGION_ID, _db=None) -> list[dict]:
     """五张指数卡：`[{key,label,value,chg1,chg7,chg30,chg90,chg180,days,base_date}]`。
 
     涨跌是百分比（`float`）；数据不足的窗口给 `None`（不用 0 冒充）。
@@ -1570,7 +1575,7 @@ def get_index_cards(region_id: int = JITA_RID, _db=None) -> list[dict]:
     return result
 
 
-def get_index_series(keys: Sequence[str] | None = None, region_id: int = JITA_RID, _db=None) -> list[dict]:
+def get_index_series(keys: Sequence[str] | None = None, region_id: int = DEFAULT_REGION_ID, _db=None) -> list[dict]:
     """指数折线 + 篮子成员表：`[{key,label,points:[{date,value}],members:[...]}]`。
 
     成员字段：`{typeId,name,weight,capped,price,chg30,source}`；`weight` 是该指数**最后一个指数日**
@@ -1607,7 +1612,7 @@ def get_index_series(keys: Sequence[str] | None = None, region_id: int = JITA_RI
     return result
 
 
-def get_dashboard(region_id: int = JITA_RID, _db=None) -> dict:
+def get_dashboard(region_id: int = DEFAULT_REGION_ID, _db=None) -> dict:
     """卡片 + 序列**一次算完** → `{"cards": [...], "series": [...]}`。
 
     形状与值同分别调 :func:`get_index_cards` / :func:`get_index_series` **逐字段一致**，
@@ -1663,7 +1668,7 @@ def _member_row(
     }
 
 
-def get_breadth(region_id: int = JITA_RID, _db=None) -> dict:
+def get_breadth(region_id: int = DEFAULT_REGION_ID, _db=None) -> dict:
     """最新交易日的市场广度：`{date,advancers,decliners,unchanged,turnover}`。
 
     统计口径：当日有成交均价、且此前有过成交的 type；`turnover` = 当日 Σ(volume × average)。

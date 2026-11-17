@@ -40,6 +40,8 @@ ComboBox {
 
     onCountChanged: measureMaxItemWidth()
     onModelChanged: measureMaxItemWidth()
+    // textRole 可能晚于 model 绑定生效（如 FPriceSourceRow 的贸易中心），换显示字段后重量
+    onTextRoleChanged: measureMaxItemWidth()
     Component.onCompleted: measureMaxItemWidth()
 
     /* 字段（没展开时那一块）的底与文字色**必须跟着主题走**。

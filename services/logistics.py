@@ -46,6 +46,13 @@ TRADE_HUB_DISTANCES: dict[tuple[str, str], int] = {
     ("Hek", "Dodixie"): 28,
     ("Hek", "Jita"): 21,
     ("Hek", "Rens"): 5,
+    # 索巴色基 —— 曙光主贸易中心（2026-11-17 由曙光星门图 `compute_jumps(..., "highsec")` 算出，
+    # 未经游戏内核对；曙光的多迪谢直连索巴色基，所以只有 1 跳）
+    ("Sobaseki", "Jita"): 7,
+    ("Sobaseki", "Amarr"): 4,
+    ("Sobaseki", "Dodixie"): 1,
+    ("Sobaseki", "Rens"): 5,
+    ("Sobaseki", "Hek"): 12,
 }
 # 反向对称
 for (a, b), d in list(TRADE_HUB_DISTANCES.items()):
