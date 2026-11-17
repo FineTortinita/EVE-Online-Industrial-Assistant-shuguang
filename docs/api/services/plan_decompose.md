@@ -63,7 +63,7 @@ def is_leaf_plan(plan: dict, all_plans: list[dict]) -> bool
 
 该计划是否为叶子产线（组内无更深子项）。
 
-定义行：`123`
+定义行：`129`
 
 ### `collect_cascade_delete_ids`
 
@@ -73,7 +73,7 @@ def collect_cascade_delete_ids(plans: list[dict], selected_ids: set[int]) -> set
 
 删除指定计划时级联删除同组更深子项（含传递层级）。
 
-定义行：`140`
+定义行：`146`
 
 ### `collect_removed_child_ids`
 
@@ -83,7 +83,7 @@ def collect_removed_child_ids(rows: list[dict], removed_type_ids: set[int]) -> s
 
 母项拆解删除集：被删组件类型的合并子项行 + 其同组子孙（沿 component_parent_type_id）。
 
-定义行：`174`
+定义行：`180`
 
 ### `collect_group_members`
 
@@ -93,4 +93,4 @@ def collect_group_members(all_plans: list[dict], selected: list[dict]) -> tuple[
 
 跨选中行聚合相关组的母项与子项（按 plan id 去重）→ (parents, children)。
 
-定义行：`209`
+定义行：`215`

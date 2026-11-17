@@ -182,7 +182,7 @@ def _format_overflow(details: list[dict]) -> str
 
 格式化溢出信息为短文本
 
-定义行：`569`
+定义行：`570`
 
 ### `_pick_price`
 
@@ -192,7 +192,7 @@ def _pick_price(price_map: dict[str, float], price_type: str) -> float
 
 按价格类型取价；缺省回退另一个来源，均无数据返回 0.0
 
-定义行：`586`
+定义行：`587`
 
 ### `_spread`
 
@@ -202,7 +202,7 @@ def _spread(price_map: dict[str, float], qty: float) -> float | None
 
 (卖价 − 买价) × 数量 —— 同一 hub 的挂单价差，按采购量换算成金额。任一侧没有挂单 → `None`。
 
-定义行：`595`
+定义行：`596`
 
 ### `self_made_type_ids`
 
@@ -212,7 +212,7 @@ def self_made_type_ids(plans: list[dict]) -> set[int]
 
 会被「自制」覆盖的产物 id：**未完工的子项产线**的产物。
 
-定义行：`615`
+定义行：`616`
 
 ### `_plan_total_runs`
 
@@ -222,17 +222,17 @@ def _plan_total_runs(plan: dict) -> int
 
 计划的**字面**总作业数 = `runs × parallels`；`runs=0` 就是 0，不兜成 1。
 
-定义行：`638`
+定义行：`639`
 
 ### `_manufacturing_need`
 
 ```python
-def _manufacturing_need(qty: int, wastefactor: int, me_level: int, runs: int, parallels: int) -> int
+def _manufacturing_need(qty: int, wastefactor: int, me_level: int, runs: int, parallels: int, mat_saving: float=1.0) -> int
 ```
 
 一条制造配方的采购/校验需求 = **逐线各自整批取整再求和**。
 
-定义行：`649`
+定义行：`650`
 
 ### `_science_material_requirements`
 
@@ -242,7 +242,7 @@ def _science_material_requirements(plan: dict) -> list[dict]
 
 科研计划要买的材料（数据核心 / 解码器 / 拷贝与研究的耗材）[&#123;type_id, name, need&#125;]。
 
-定义行：`664`
+定义行：`670`
 
 ### `_cache_item_meta`
 
@@ -252,7 +252,27 @@ def _cache_item_meta(conn, mid: int, names: dict, volumes: dict, zh_en: dict) ->
 
 补一份该材料的名称/体积缓存（制造、科研、强制启动缺口三条取料分支共用）。
 
-定义行：`679`
+定义行：`685`
+
+### `_plan_mat_saving`
+
+```python
+def _plan_mat_saving(plan: dict, cache: dict[tuple[int, int], float], activity: str=ACTIVITY_MANUFACTURING) -> float
+```
+
+计划材料机库对该产物的材料倍率（制造 / 反应各按自己的建筑与改装件）；无机库 → 1.0。
+
+定义行：`698`
+
+### `_plan_recipe`
+
+```python
+def _plan_recipe(conn, plan: dict, pid: int) -> tuple[list[tuple[int, int, int]], str] | None
+```
+
+计划自己那张配方的材料 → ([(材料, 基础量, wastefactor)], 活动)；查不到 → None。
+
+定义行：`708`
 
 ### `aggregate_procurement`
 
@@ -262,7 +282,7 @@ def aggregate_procurement(conn, plans: list[dict], *, hangar_id: int | None=None
 
 聚合「备料中」计划的待采购材料并扣库存 → (rows, total_cost, total_volume)。
 
-定义行：`692`
+定义行：`726`
 
 ### `_item_meta_entry`
 
@@ -272,7 +292,7 @@ def _item_meta_entry(conn, mid: int) -> dict
 
 材料条目的元数据骨架 `&#123;name, total_qty, volume&#125;`（`expand_material_requirements` 同结构）。
 
-定义行：`860`
+定义行：`893`
 
 ### `collect_direct_materials`
 
@@ -282,4 +302,24 @@ def collect_direct_materials(conn, plans: list[dict]) -> dict[int, dict]
 
 聚合各计划的直接材料（recipe 一层，非递归），排除由子项产线自制的组件。
 
-定义行：`873`
+定义行：`906`
+
+### `plan_direct_needs`
+
+```python
+def plan_direct_needs(conn, plan: dict, saving_cache: dict[tuple[int, int], float]) -> dict[int, int]
+```
+
+单个计划的直接材料需求 `&#123;type_id: 量&#125;`（**含**自制中间件 —— 占用分配要知道子项产出顶掉了多少）。
+
+定义行：`972`
+
+### `compute_reservations`
+
+```python
+def compute_reservations(conn, rows: list[dict]) -> dict[str, Any]
+```
+
+全量计划行 → 备料占用分配（不落库，每次刷新重算）。
+
+定义行：`997`

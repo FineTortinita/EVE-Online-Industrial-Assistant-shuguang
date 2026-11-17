@@ -14,7 +14,7 @@
 def check_items() -> int
 ```
 
-返回 item 表中 **已填写名称** 的行数，<ITEMS_NAMED_READY 视为未初始化
+返回 item 表中 **已填写名称** 的行数，&lt;ITEMS_NAMED_READY 视为未初始化
 
 定义行：`19`
 
@@ -24,7 +24,7 @@ def check_items() -> int
 def check_item_names_ratio() -> float
 ```
 
-返回 item 表中缺名的比例（0~1），< 5% 视为可接受
+返回 item 表中缺名的比例（0~1），&lt; 5% 视为可接受
 
 定义行：`32`
 

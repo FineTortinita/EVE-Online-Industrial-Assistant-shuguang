@@ -26,7 +26,7 @@ def _default_db()
 
 惰性获取 DatabaseManager（经容器）。
 
-定义行：`25`
+定义行：`22`
 
 ### `_default_pricing`
 
@@ -36,7 +36,7 @@ def _default_pricing()
 
 惰性获取 PricingService（经容器）。
 
-定义行：`30`
+定义行：`27`
 
 ### `_resolve_name`
 
@@ -46,7 +46,7 @@ def _resolve_name(c, type_id: int) -> str
 
 解析物品名称 — 委托给 name_resolver
 
-定义行：`61`
+定义行：`58`
 
 ### `_find_blueprint_for_product`
 
@@ -56,7 +56,7 @@ def _find_blueprint_for_product(conn, product_type_id: int, activity: str='manuf
 
 查找产出指定物品的蓝图 → (bp_id, output_qty, base_time)。
 
-定义行：`68`
+定义行：`65`
 
 ### `_get_materials`
 
@@ -66,17 +66,17 @@ def _get_materials(conn, bp_id: int, activity: str='manufacturing')
 
 获取蓝图材料列表 → [(material_type_id, quantity), ...]
 
-定义行：`82`
+定义行：`79`
 
-### `_expand`
+### `_build_tree`
 
 ```python
-def _expand(conn, type_id: int, needed_qty: float, bp_me: int, price_hub: str, price_type: str, depth: int, max_depth: int, seen: set[int], cache: dict[int, BomNode]) -> BomNode
+def _build_tree(conn, result, type_id: int, quantity: float, price_hub: str, price_type: str, max_depth: int) -> BomNode
 ```
 
-内部递归展开。
+引擎结果（合并后的 DAG）→ 展示用的树。
 
-定义行：`100`
+定义行：`97`
 
 ### `expand_bom`
 
@@ -84,9 +84,9 @@ def _expand(conn, type_id: int, needed_qty: float, bp_me: int, price_hub: str, p
 def expand_bom(type_id: int, quantity: int=1, bp_me: int=0, price_hub: str='Jita', price_type: str='sell', max_depth: int=5, char_config: dict | None=None) -> dict
 ```
 
-递归展开 BOM 树，返回完整的材料层级结构。
+展开 BOM，返回材料层级结构（全部制造件自己造、反应产物与原料买入；所有层级用同一个 `bp_me`）。
 
-定义行：`256`
+定义行：`154`
 
 ### `get_material_tree`
 
@@ -96,7 +96,7 @@ def get_material_tree(type_id: int, quantity: int=1, bp_me: int=0, price_hub: st
 
 返回 BOM 树根节点（简洁接口）
 
-定义行：`377`
+定义行：`255`
 
 ### `get_flat_materials`
 
@@ -106,7 +106,7 @@ def get_flat_materials(type_id: int, quantity: int=1, bp_me: int=0, price_hub: s
 
 返回扁平化的所有叶子材料列表（购物清单）
 
-定义行：`395`
+定义行：`273`
 
 ### `print_tree`
 
@@ -116,7 +116,7 @@ def print_tree(node: BomNode, indent: int=0) -> str
 
 调试用：打印 BOM 树结构
 
-定义行：`413`
+定义行：`291`
 
 ## 类
 
@@ -124,4 +124,4 @@ def print_tree(node: BomNode, indent: int=0) -> str
 
 BOM 树节点 — 描述一个材料/中间产品的层级信息
 
-定义行：`41`
+定义行：`38`

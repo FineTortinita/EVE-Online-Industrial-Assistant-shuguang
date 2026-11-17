@@ -37,3 +37,13 @@ def load_implants() -> list[dict]
 从 item_dogma 表加载所有工业植入体。
 
 定义行：`74`
+
+### `manufacturing_time_bonuses`
+
+```python
+def manufacturing_time_bonuses(implant_ids: list | None) -> list[float]
+```
+
+人物配置里的植入体 → 各自的制造时间加成百分比列表（无此属性 / 查不到的不计）。
+
+定义行：`124`

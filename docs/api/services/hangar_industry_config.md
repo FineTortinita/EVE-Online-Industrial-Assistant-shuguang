@@ -27,7 +27,7 @@ def _default_db() -> DatabaseManager
 
 惰性获取 DatabaseManager（经容器，消除模块级单例双轨）。
 
-定义行：`24`
+定义行：`25`
 
 ### `rig_category_label`
 
@@ -37,7 +37,7 @@ def rig_category_label(cat: str) -> str
 
 改件类别标签：terminology.json（rig_categories）为权威来源，内置表兜底。
 
-定义行：`131`
+定义行：`167`
 
 ### `parse_rigs`
 
@@ -47,7 +47,7 @@ def parse_rigs(raw: str | None) -> list[int]
 
 json.loads 容错：None/非法 JSON/非列表 → []，元素 int 化。
 
-定义行：`136`
+定义行：`172`
 
 ### `get_rig_catalog`
 
@@ -57,7 +57,7 @@ def get_rig_catalog(facility_type: str | None, *, _db: DatabaseManager | None=No
 
 返回该设施可装配的改件目录（含 ESI 加成），供机库设置 UI 使用。NPC/未选 → []。
 
-定义行：`155`
+定义行：`191`
 
 ### `validate_rig_set`
 
@@ -67,7 +67,7 @@ def validate_rig_set(rig_ids: list[int], facility_type: str | None, *, _db: Data
 
 返回违规描述列表（空=合法）。规则：同制造类别互斥、尺寸匹配、未知 id。
 
-定义行：`204`
+定义行：`243`
 
 ### `_rig_matches_activity`
 
@@ -77,7 +77,7 @@ def _rig_matches_activity(rig_group: int, *, activity: str | None, blueprint_cat
 
 该改件是否作用于当前活动/蓝图类别。
 
-定义行：`239`
+定义行：`278`
 
 ### `_load_rig_bonuses`
 
@@ -87,27 +87,37 @@ def _load_rig_bonuses(rig_ids: list[int], *, activity: str | None, _db: Database
 
 读改件加成（mat/time/cost）与 item.group 归属；表未就绪 → None。
 
-定义行：`269`
+定义行：`314`
+
+### `_rig_security_mult`
+
+```python
+def _rig_security_mult(rig_group: int | None, band: str) -> float
+```
+
+该改装件在本安等档位下的放大系数（制造 / 科研 1.0·1.9·2.1；反应 1.0·1.0·1.1）。
+
+定义行：`363`
 
 ### `resolve_rig_multipliers`
 
 ```python
-def resolve_rig_multipliers(rig_ids: list[int], *, activity: str | None=None, blueprint_category: str | None=None, _db: DatabaseManager | None=None) -> tuple[float, float]
+def resolve_rig_multipliers(rig_ids: list[int], *, activity: str | None=None, blueprint_category: str | None=None, security: float | None=None, _db: DatabaseManager | None=None) -> tuple[float, float]
 ```
 
-(材料倍率, 时间倍率) 乘算叠加：Π(1 + bonus/100)。structure_rigs 缺行按加成 0。
+(材料倍率, 时间倍率) 乘算叠加：Π(1 + bonus × 安等系数 / 100)。structure_rigs 缺行按加成 0。
 
-定义行：`318`
+定义行：`370`
 
 ### `resolve_rig_cost_multiplier`
 
 ```python
-def resolve_rig_cost_multiplier(rig_ids: list[int], *, activity: str | None=None, blueprint_category: str | None=None, _db: DatabaseManager | None=None) -> float
+def resolve_rig_cost_multiplier(rig_ids: list[int], *, activity: str | None=None, blueprint_category: str | None=None, security: float | None=None, _db: DatabaseManager | None=None) -> float
 ```
 
-成本倍率 Π(1 + cost_bonus/100)；无数据 → 1.0（零漂移）。
+成本倍率 Π(1 + cost_bonus × 安等系数 / 100)；无数据 → 1.0（零漂移）。
 
-定义行：`351`
+定义行：`409`
 
 ### `_blueprint_rig_category`
 
@@ -117,7 +127,37 @@ def _blueprint_rig_category(product_type_id: int | None, *, _db: DatabaseManager
 
 产物 type_id → rig 制造类别 key（查 reference.db item，纯映射在 `domain.rigs`）。
 
-定义行：`381`
+定义行：`441`
+
+### `_reaction_rig_category`
+
+```python
+def _reaction_rig_category(product_type_id: int | None, *, _db: DatabaseManager | None) -> str | None
+```
+
+反应产物 → 反应改装件类别（按其反应配方的 item.group_id，见 `REACTION_FORMULA_GROUP_CATEGORY`）。
+
+定义行：`464`
+
+### `_system_security`
+
+```python
+def _system_security(solar_system_id: int | None, *, _db: DatabaseManager | None) -> float | None
+```
+
+星系安等（reference.db `solar_system.security`）；未设星系 / 查不到 → None（按高安）。
+
+定义行：`483`
+
+### `_structure_base`
+
+```python
+def _structure_base(facility_type: str | None, activity: str | None) -> dict
+```
+
+设施本体倍率：精炼建筑只对反应生效，工程建筑只对非反应生效，不匹配按 NPC（1.0）。
+
+定义行：`500`
 
 ### `resolve_hangar_industry_config`
 
@@ -128,4 +168,24 @@ def resolve_hangar_industry_config(hangar_id: int | None, *, activity: str | Non
 解析机库工业配置 → &#123;structure_mat_saving, structure_time_mod, structure_cost_mult,
 facility_tax, facility_type, rig_ids&#125;。无机库/未配置 → 全默认（倍率 1.0、税 None）。
 
-定义行：`404`
+定义行：`515`
+
+### `manufacturing_mat_saving`
+
+```python
+def manufacturing_mat_saving(hangar_id: int | None, product_type_id: int | None, *, cache: dict[tuple[int, int], float] | None=None, _db: DatabaseManager | None=None) -> float
+```
+
+计划侧「这条制造作业在这个机库里的材料倍率」（建筑 × 匹配的改装件 × 安等），无机库 → 1.0。
+
+定义行：`579`
+
+### `reaction_mat_saving`
+
+```python
+def reaction_mat_saving(hangar_id: int | None, product_type_id: int | None, *, cache: dict[tuple[int, int], float] | None=None, _db: DatabaseManager | None=None) -> float
+```
+
+反应作业在这个机库里的材料倍率（精炼建筑 × 反应改装件 × 安等），无机库 → 1.0。缓存键与制造分开。
+
+定义行：`607`

@@ -26,7 +26,7 @@ def _is_active(row: dict) -> bool
 此函数暂无 docstring，欢迎补充。
 :::
 
-定义行：`33`
+定义行：`32`
 
 ### `_is_locked`
 
@@ -38,7 +38,7 @@ def _is_locked(row: dict) -> bool
 此函数暂无 docstring，欢迎补充。
 :::
 
-定义行：`37`
+定义行：`36`
 
 ### `_mother_key`
 
@@ -50,7 +50,7 @@ def _mother_key(row: dict) -> int
 此函数暂无 docstring，欢迎补充。
 :::
 
-定义行：`41`
+定义行：`40`
 
 ### `_sub_level`
 
@@ -62,7 +62,7 @@ def _sub_level(row: dict) -> int
 此函数暂无 docstring，欢迎补充。
 :::
 
-定义行：`45`
+定义行：`44`
 
 ### `_group_of`
 
@@ -74,7 +74,7 @@ def _group_of(row: dict) -> int
 此函数暂无 docstring，欢迎补充。
 :::
 
-定义行：`49`
+定义行：`48`
 
 ### `_parse_sources`
 
@@ -86,7 +86,7 @@ def _parse_sources(row: dict) -> set[int]
 此函数暂无 docstring，欢迎补充。
 :::
 
-定义行：`53`
+定义行：`52`
 
 ### `_in_scope`
 
@@ -96,7 +96,7 @@ def _in_scope(sources: set[int], group_number: int, scope: set[int] | None, scop
 
 这一行是否落在本次写入作用域内（`rebuild_children(mother_ids=...)`）。
 
-定义行：`60`
+定义行：`59`
 
 ### `_collect_mothers`
 
@@ -106,17 +106,7 @@ def _collect_mothers(all_rows: list[dict]) -> list[dict]
 
 识别母项：sub_level=0 且（旧式 group>0 或被子项 source 引用/自身带 source 的拆解母项）。
 
-定义行：`74`
-
-### `_accumulate`
-
-```python
-def _accumulate(conn, nodes: dict[int, dict], first_mother: dict, type_id: int, qty: int, level: int, parent_type_id: int, existing_parallels: dict[int, int]) -> None
-```
-
-把 qty 记到 `type_id` 的需求上，并补全节点元数据。**这里不算 runs**。
-
-定义行：`89`
+定义行：`73`
 
 ### `plan_net_runs`
 
@@ -126,7 +116,7 @@ def plan_net_runs(demand: int, output_per_run: int, available: int, parallels: i
 
 净需求 → `(并行数, 每条线轮数, 净需求线·轮数)`。**排产口径的唯一真源**。
 
-定义行：`142`
+定义行：`88`
 
 ### `_finalize_runs`
 
@@ -136,7 +126,7 @@ def _finalize_runs(node: dict, stocks: dict[int, dict[int, int]]) -> None
 
 把本轮收齐的 demand 折算成 runs（**每条产线的流程数**）+ 顺带定并行数，净口径不多造。
 
-定义行：`191`
+定义行：`137`
 
 ### `compute_child_forest`
 
@@ -144,9 +134,9 @@ def _finalize_runs(node: dict, stocks: dict[int, dict[int, int]]) -> None
 def compute_child_forest(conn, active_mothers: list[dict], stocks: dict[int, dict[int, int]], existing_parallels: dict[int, int]) -> dict[int, dict]
 ```
 
-全局需求传播 → &#123;type_id: node&#125;。
+全局需求传播 → &#123;type_id: node&#125;（子项节点 dict，供 `rebuild_children` / 拆解预览落库或展示）。
 
-定义行：`252`
+定义行：`198`
 
 ### `rebuild_children`
 
@@ -156,7 +146,7 @@ def rebuild_children(*, create: bool=False, prune: bool=False, mother_ids: set[i
 
 按母项当前需求同步子项（增量，默认不创建/不删除——避免误删子项被自动加回）。
 
-定义行：`337`
+定义行：`276`
 
 ### `_resolve_name`
 
@@ -168,7 +158,7 @@ def _resolve_name(type_id: int) -> str
 此函数暂无 docstring，欢迎补充。
 :::
 
-定义行：`533`
+定义行：`472`
 
 ### `_field_diff`
 
@@ -178,7 +168,7 @@ def _field_diff(row: dict, fields: dict) -> dict
 
 返回 fields 中与本行当前值不同的子集（幂等：值未变则跳过，计 0）。
 
-定义行：`539`
+定义行：`478`
 
 ### `_inherited_solar_system`
 
@@ -190,4 +180,4 @@ def _inherited_solar_system(mother: dict) -> int | None
 此函数暂无 docstring，欢迎补充。
 :::
 
-定义行：`553`
+定义行：`492`

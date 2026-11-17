@@ -98,7 +98,7 @@ YAML 缓存是否完整：完成标记存在 + 标记内文件集合与当前 YA
 def _write_yaml_atomic(fname: str, raw: str) -> None
 ```
 
-写 <目标>.part 后原子替换 —— 中断只留 .part，目标文件不会是半写状态。
+写 &lt;目标>.part 后原子替换 —— 中断只留 .part，目标文件不会是半写状态。
 
 定义行：`273`
 

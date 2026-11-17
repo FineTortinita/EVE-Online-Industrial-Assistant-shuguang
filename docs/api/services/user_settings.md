@@ -27,7 +27,7 @@ v1→v2：曙光主贸易中心是索巴色基；旧国际服默认 Jita 改为�
 def _migrate_settings(data: dict) -> dict
 ```
 
-惰性升级 settings 结构：版本 < CURRENT 时逐级迁移并落盘。
+惰性升级 settings 结构：版本 &lt; CURRENT 时逐级迁移并落盘。
 
 定义行：`38`
 

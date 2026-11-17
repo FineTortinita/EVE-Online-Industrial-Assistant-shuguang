@@ -12,7 +12,7 @@
 版本号: 整数，从 1 开始。PRAGMA user_version = 0 视为"未知旧库"。
 
 自动备份: 每次检测到需要迁移的库，先 VACUUM INTO 一份快照到
-<库目录>/backups/ 下（保留最近 BACKUP_KEEP 份），迁移失败/回滚后可手动恢复。
+&lt;库目录>/backups/ 下（保留最近 BACKUP_KEEP 份），迁移失败/回滚后可手动恢复。
 
 ## 函数
 
@@ -142,7 +142,7 @@ v9→v10: production_plans 新增 deducted_materials 列（启动扣减快照，
 def _migrate_user_v15_to_v16(db_path: str) -> str
 ```
 
-v15→v16: user_blueprints 原图权威化（runs<0 → is_bpo=1, runs=0）。
+v15→v16: user_blueprints 原图权威化（runs&lt;0 → is_bpo=1, runs=0）。
 
 定义行：`293`
 

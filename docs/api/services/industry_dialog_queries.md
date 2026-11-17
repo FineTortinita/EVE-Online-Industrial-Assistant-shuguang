@@ -187,3 +187,13 @@ def _format_blueprint_duration(conn, blueprint_type_id) -> str
 :::
 
 定义行：`348`
+
+### `get_fill_sheet`
+
+```python
+def get_fill_sheet(db) -> list[dict[str, Any]]
+```
+
+填料总表（T2 式，阶段 4a）：按材料机库分组的备料占用汇总。
+
+定义行：`357`

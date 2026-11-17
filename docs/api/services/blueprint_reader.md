@@ -65,7 +65,7 @@ def get_blueprint_products(conn: sqlite3.Connection, product_type_id: int, activ
 
 ### `class SqliteBlueprintReader`
 
-BlueprintReader 适配 — 基于 sqlite 连接的蓝图查询（实现 domain.bom.BlueprintReader）。
+BlueprintReader 适配 — 基于 sqlite 连接的蓝图查询（实现 domain.industry_calc.BlueprintReader）。
 
 定义行：`150`
 

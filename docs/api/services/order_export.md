@@ -49,7 +49,7 @@ def _norm_col(name: str) -> str
 def _clean_value(raw: str) -> str
 ```
 
-拆掉 ``<localized>`` 包装并去掉值尾部那个占位 ``*``。
+拆掉 ``&lt;localized>`` 包装并去掉值尾部那个占位 ``*``。
 
 定义行：`107`
 

@@ -121,8 +121,14 @@ def _escape_markdown(text: str) -> str:
 
     markdown-it-attrs 会把 `{..}` 解析为 HTML 属性（如 `{ "items": bool }`），
     不转义会导致 Vue 编译报 Duplicate attribute。
+    行内代码之外的 `<` 也要转义：`建筑 <id>` 会被 Vue 当成未闭合标签（Element is missing end tag）；
+    代码段内 markdown-it 自己会转义，再转一次反而显示成字面 `&lt;`。
     """
-    return text.replace("{", "&#123;").replace("}", "&#125;")
+    text = text.replace("{", "&#123;").replace("}", "&#125;")
+    segments = text.split("`")
+    for i in range(0, len(segments), 2):  # 偶数段在反引号之外
+        segments[i] = segments[i].replace("<", "&lt;")
+    return "`".join(segments)
 
 
 def _doc_first_paragraph(doc: str | None) -> str:

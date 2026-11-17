@@ -7,9 +7,10 @@
 拉取结构改装件（Standup Engineering Rigs）的制造加成（从 ESI /universe/types/ 并发拉取）
 
 只处理制造相关的工程站改装件组（reference.db item 表 group 1816-1870，剔除
-1818 Strong Boxes 与 1817 空组，共 53 组 111 个改件）：
-  - 材料效率钻机（attributeEngRigMatBonus=2594）
-  - 时间效率钻机（attributeEngRigTimeBonus=2593）
+1818 Strong Boxes 与 1817 空组，共 53 组 111 个改件），以及精炼建筑的反应改装件
+（group 1933-1939，2026-11-17 补，BL-052-3）：
+  - 材料效率钻机（attributeEngRigMatBonus=2594；反应改件 RefRigMatBonus=2714）
+  - 时间效率钻机（attributeEngRigTimeBonus=2593；反应改件 RefRigTimeBonus=2713）
   - 成本优化钻机（attributeEngRigCostBonus=2595；发明/ME/TE 研究/拷贝成本）
 
 说明：SDE 的 typeIDs.yaml 导出不含 dogmaAttributes，改件加成直接走 ESI 拉取，
@@ -30,7 +31,7 @@ def init_db(db_path: str)
 
 建表 / 给旧缓存库补 `cost_bonus` 列（列不存在则 ALTER，幂等）。
 
-定义行：`97`
+定义行：`111`
 
 ### `get_rig_type_ids`
 
@@ -40,7 +41,7 @@ def get_rig_type_ids(db_path: str) -> list[int]
 
 从 item 表按改装件组查询 type_id 列表
 
-定义行：`126`
+定义行：`140`
 
 ### `fetch_rig_bonuses`
 
@@ -50,7 +51,7 @@ async def fetch_rig_bonuses(client, type_id: int) -> dict | None
 
 从 ESI 获取 type 的材料/时间/成本加成
 
-定义行：`140`
+定义行：`154`
 
 ### `main`
 
@@ -60,4 +61,4 @@ async def main(progress_cb=None)
 
 初始化表 → 查已缓存 → 增量并发拉取缺失 → 写入 structure_rigs
 
-定义行：`161`
+定义行：`175`
