@@ -36,8 +36,10 @@ def bridge(qapp):
 def test_regions_come_from_the_shared_sources(bridge):
     """区域取自既有常量，不在桥里另抄一份。"""
     from core.constants import TRADE_HUBS
+    from services.name_resolver import hub_options
 
-    assert bridge.regions == list(TRADE_HUBS)
+    assert bridge.regions == [item["label"] for item in hub_options(TRADE_HUBS)]
+    assert bridge.regions[0] == "索巴色基"
 
 
 @pytest.mark.ui

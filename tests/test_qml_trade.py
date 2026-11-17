@@ -300,12 +300,13 @@ def bridge(qapp, tmp_path, monkeypatch):
 
 @pytest.mark.ui
 def test_defaults_are_buy_at_a_sell_at_b(bridge):
-    """从 Jita 的卖单买入、卖到 Amarr 的买单 —— 这才是「买入价 / 卖出价」。"""
+    """从索巴色基的卖单买入、卖到 Amarr 的买单 —— 这才是「买入价 / 卖出价」。"""
     from core.constants import TRADE_HUB_IDS
+    from services.name_resolver import hub_options
 
-    assert bridge.hubs == list(TRADE_HUB_IDS.keys())
-    assert bridge.hubs[bridge.fromIndex] == "Jita"
-    assert bridge.hubs[bridge.toIndex] == "Amarr"
+    assert bridge.hubs == [h["label"] for h in hub_options(list(TRADE_HUB_IDS))]
+    assert bridge.hubs[bridge.fromIndex] == "索巴色基"
+    assert bridge.hubs[bridge.toIndex] == "阿玛尔"
     assert bridge.sideLabels[bridge.fromSideIndex] == "卖单"
     assert bridge.sideLabels[bridge.toSideIndex] == "买单"
     assert bridge.busy is False
@@ -335,8 +336,8 @@ def test_category_list_starts_with_all(bridge, monkeypatch):
 def test_swap_direction_flips_hubs_and_sides(bridge):
     bridge.swapDirection()
 
-    assert bridge.hubs[bridge.fromIndex] == "Amarr"
-    assert bridge.hubs[bridge.toIndex] == "Jita"
+    assert bridge.hubs[bridge.fromIndex] == "阿玛尔"
+    assert bridge.hubs[bridge.toIndex] == "索巴色基"
     assert bridge.sideLabels[bridge.fromSideIndex] == "买单"
     assert bridge.sideLabels[bridge.toSideIndex] == "卖单"
 
@@ -383,7 +384,7 @@ def test_add_to_cart_carries_the_current_direction(bridge):
     bridge.addToCart(0)
 
     group = bridge._cart.groups()[0]
-    assert group["label"] == "Jita(卖单) → Amarr(买单)"
+    assert group["label"] == "Sobaseki(卖单) → Amarr(买单)"
     assert group["rows"][0]["typeId"] == 34
     assert "购物车 1 项" in bridge.cartSummary
 
@@ -418,6 +419,14 @@ def test_unprofitable_rows_are_hidden(bridge):
     _feed(bridge, [_row(tid=1, spread=5.0), _row(tid=2, spread=-5.0), _row(tid=3, spread=0.0)])
 
     assert [r["id"] for r in bridge._visible] == [1]
+
+    # 体积运费：体积 0.01 m³ × 400 ISK/m³ = 4 ISK，5 的价差剩 1，仍赚钱；600 ISK/m³ 扣成负 → 被挡掉
+    bridge.setFreightRate(400.0)
+    assert [r["id"] for r in bridge._visible] == [1]
+    assert bridge._visible[0]["net"] == pytest.approx(1.0)
+    assert bridge._visible[0]["npm3"] == pytest.approx(100.0)
+    bridge.setFreightRate(600.0)
+    assert bridge._visible == []
 
 
 @pytest.mark.ui

@@ -23,6 +23,7 @@ def _make_src(tmp_path: Path) -> Path:
     (tmp_path / "data").mkdir()
     (tmp_path / "data" / "terminology.json").write_text("{}", encoding="utf-8")
     (tmp_path / "data" / "mfg_browser_settings.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "data" / "pi_schematics.json").write_text("{}", encoding="utf-8")
     (tmp_path / "data" / "sde.zip").write_bytes(b"x" * 10)  # SDE 原料 → 不入包
     (tmp_path / "data" / "universe_data.json").write_text("{}", encoding="utf-8")
     (tmp_path / "data" / "caches").mkdir()
@@ -42,7 +43,7 @@ def _patch_paths(monkeypatch, src: Path, tmp_path: Path) -> Path:
 
 
 def test_organize_release_copies_whitelist_only(tmp_path, monkeypatch):
-    """产物只含白名单文件：模板库 2 个 + data 2 个 + exe/README"""
+    """产物只含白名单文件：模板库 2 个 + data 3 个 + exe/README"""
     src = _make_src(tmp_path)
     release = _patch_paths(monkeypatch, src, tmp_path)
 
@@ -51,6 +52,7 @@ def test_organize_release_copies_whitelist_only(tmp_path, monkeypatch):
     assert sorted(p.name for p in (release / "database").iterdir()) == ["blueprint.db", "reference.db"]
     assert sorted(p.name for p in (release / "data").iterdir()) == [
         "mfg_browser_settings.json",
+        "pi_schematics.json",
         "terminology.json",
     ]
     assert (release / "EVE商人助手-曙光.exe").exists()

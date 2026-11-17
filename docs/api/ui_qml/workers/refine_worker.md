@@ -19,7 +19,7 @@
 ##### `__init__`
 
 ```python
-def __init__(self, items: list[dict], *, skills: dict | None=None, is_player_facility: bool=False, price_hub: str='Jita', gas_rate: float=0.0, residual: bool=False, parent=None)
+def __init__(self, items: list[dict], *, skills: dict | None=None, is_player_facility: bool=False, price_hub: str='Sobaseki', gas_rate: float=0.0, residual: bool=False, parent=None)
 ```
 
 ::: warning ⚠️ 待补 docstring

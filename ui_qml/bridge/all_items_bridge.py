@@ -239,8 +239,8 @@ def insert_plan_from_score(type_id: int, name: str, score: dict, data: dict, mfg
         type_id,
         name,
         data,
-        mat_hub=mfg_cfg.get("hub", "Jita"),
-        sell_hub=mfg_cfg.get("hub", "Jita"),
+        mat_hub=mfg_cfg.get("hub", "Sobaseki"),
+        sell_hub=mfg_cfg.get("hub", "Sobaseki"),
         facility=data.get("fac", ""),
         solar_system_id=solar_system_id,
         mat_hangar_id=mat_hangar_id,
@@ -315,8 +315,8 @@ class AllItemsBridge(DialogBridge):
         self._cat_index = 0
         self._data: list[dict] = []
         self._filt: list[dict] = []
-        self._mfg: dict[str, Any] = {"hub": "Jita", "char": "main", "tax": 0}
-        self._trade: dict[str, Any] = {"bh": "Amarr", "sh": "Jita", "bs": "sell", "ss": "sell", "char": "main"}
+        self._mfg: dict[str, Any] = {"hub": "Sobaseki", "char": "main", "tax": 0}
+        self._trade: dict[str, Any] = {"bh": "Amarr", "sh": "Sobaseki", "bs": "sell", "ss": "sell", "char": "main"}
         #: 价格查询区域（查询页右上角那个下拉）。原先 `_reload_items` / `_do_search`
         #: **硬编码** `JITA_RID`，所以换区域对它毫无影响 —— 用户报的「右上角选价格区域
         #: 对全物品不生效」就是这个。现在由 `QueryBridge.setRegionIndex` 经 `setRegionId` 转发。

@@ -237,6 +237,8 @@ def parse_blueprint_clipboard(raw: str, conn) -> tuple[list[dict], int, int]:
         cols = line.split("\t")
         if len(cols) < 5:
             continue
+        if len(cols) >= 6 and cols[5].strip().lower().endswith(("m3", "m³")):
+            raise ValueError("复制位置错误：请从游戏内制造页面复制蓝图（Ctrl+C），不要从机库列表复制。")
         name_part = cols[0].strip().rstrip("*")
         if not name_part:
             continue

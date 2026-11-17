@@ -174,7 +174,7 @@ def test_review_bridge_loads_rows_and_summary(harness: _Harness):
     b = harness.bridge
     assert b.mode() == "full"
     assert b.modeIndex == 1
-    assert [h["label"] for h in b.hubs][0] == "Jita (吉他)"
+    assert b.hubs[0] == {"label": "吉他", "value": "Jita"}
     assert b.discount == 0.9
     assert len(b.rows) == 2
     assert b.rows[0]["name"] == "三钛合金"

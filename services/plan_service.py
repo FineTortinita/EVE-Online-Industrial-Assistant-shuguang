@@ -355,7 +355,7 @@ def _fetch_rows(where_sql: str = "", params: tuple = ()) -> list[dict]:
 
 def _make_cost_hub(row: dict, ps: dict) -> str:
     """本行「自制成本」用的材料 Hub（行自己的 > 全局设置 > Jita）。"""
-    return str(row.get("mat_hub") or ps.get("mat_hub") or "Jita")
+    return str(row.get("mat_hub") or ps.get("mat_hub") or "Sobaseki")
 
 
 def _make_cost_hangar(row: dict) -> int:

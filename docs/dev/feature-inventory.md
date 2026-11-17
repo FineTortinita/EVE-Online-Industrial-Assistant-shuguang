@@ -32,7 +32,7 @@
 
 外壳：`ui_qml/shell_window.py:ShellWindow` + `ui_qml/qml/shell/Main.qml`。
 主工具栏（价格与更新的入口）：`ui_qml/qml/shell/Main.qml`。
-五个贸易中心：`core/constants.py:TRADE_HUB_IDS`（Jita / Amarr / Dodixie / Rens / Hek）。
+六个贸易中心：`core/constants.py:TRADE_HUB_IDS`（Sobaseki / Jita / Amarr / Dodixie / Rens / Hek；曙光主中心索巴色基排首位、作默认价格基准）。
 **中文名在界面里是三套并存，写 README 时不要声称「界面显示某某中文名」**：
 
 - 估价页中心下拉 / 机库标签 → `吉他 (Jita)` 这种中文+英文对照（`ui_qml/bridge/estimate_bridge.py:EstimateBridge.hubOptions`、`ui_qml/bridge/inventory_bridge.py:InventoryBridge.hubs`，中文名取自 `data/terminology.json` 的 `system_names`）
@@ -61,9 +61,12 @@
 | 区域切换 | 换查询与详情用的贸易中心 | `ui_qml/qml/pages/QueryPage.qml`（区域下拉）→ `query_bridge.py:QueryBridge.setRegionIndex` |
 | 宏「全物品」按钮 | 把工作区切成全物品浏览 / 再点一次返回 | `ui_qml/qml/pages/QueryPage.qml`（`allItemsButton`，文案在「全物品」/「返回」之间切）→ `query_bridge.py:QueryBridge.openAllItems` / `closeAllItems` / `allItemsVisible` |
 | 清空 | 清掉当前选中（或清全物品的筛选），回到空闲态仪表盘 | `ui_qml/qml/pages/QueryPage.qml`（「清空」）→ `query_bridge.py:QueryBridge.clear` |
+| LP 兑换价值 | 选 NPC 公司，按所选贸易中心卖价算每个兑换项的利润与 ISK/LP，标出卖单挂量不足 | `ui_qml/qml/pages/QueryPage.qml`（`lpStoreButton`「LP 兑换」）→ `query_bridge.py:QueryBridge.openLpStore` → `ui_qml/bridge/lp_store_bridge.py:LpStoreBridge`；取数 `services/lp_service.py`，公式 `domain/lp.py` |
+| 行星加工利润 | 68 条行星加工配方按每小时利润排序，可选层级 / 价格中心 / 海关税率 / 原料是否进口 | `ui_qml/qml/pages/QueryPage.qml`（`piButton`「行星加工」）→ `query_bridge.py:QueryBridge.openPi` → `ui_qml/bridge/pi_bridge.py:PiBridge`；取数 `services/pi_service.py`，公式 `domain/pi.py`，配方 `data/pi_schematics.json`（`scripts/infinity_fsd.py schematics` 导出） |
 | 首屏仪表盘 | 不查东西时的主区域（产线详情 / 资产折线图 / 挂单列表） | `ui_qml/qml/pages/query/QueryDashboard.qml` |
 | 产线详情 | 每个人物一块，制造 / 科研 / 反应各一行容量条 + 「待下线 N」 | `QueryDashboard.qml`（「产线详情」）← `query_dashboard_bridge.py:QueryDashboardBridge.occupancyRows` / `occupancyByChar` / `occupancySummary` |
 | 资产折线图 | 总资产 / 挂单金额 / 库存材料 / 运行中产线价值 / 钱包余额五条线；图例可开关、四档时间跨度、手动刷新 | `ui_qml/qml/pages/query/AssetChartPanel.qml`（「资产（表格显示）」「刷新」「时间跨度」）← `query_dashboard_bridge.py:QueryDashboardBridge.assetSeries` / `assetSummaryRows` / `setRangeIndex` / `toggleSeries` / `reloadAssets` |
+| 被压单提醒 / 改单价 | 挂单「位次」为「不在首位」时给出抢回首位的合法改单价（4 位有效数字网格），汇总显示被压单笔数，双击行复制改单价 | `query_dashboard_bridge.py:QueryDashboardBridge._order_cell_rows` / `copyRepricePrice`；公式 `domain/order_price.py:undercut_price`；双击信号 `components/PanelTable.qml:rowDoubleClicked` |
 | 挂单列表（读游戏导出） | 读 `我的文档\EVE\logs\Marketlogs\` 里最新的订单导出文件，分买单 / 卖单两块 | `ui_qml/qml/pages/query/OpenOrdersPanel.qml`（「读取订单」）← `query_dashboard_bridge.py:QueryDashboardBridge.readOrders`；解析在 `services/order_export.py` |
 | 从 ESI 同步钱包与挂单 | 拉全部已绑定角色的钱包余额与未结挂单，直接覆盖本地 | `OpenOrdersPanel.qml`（「从 ESI 同步」）← `query_dashboard_bridge.py:QueryDashboardBridge.syncOrdersFromEsi`；`ui_qml/workers/esi_wallet_worker.py` |
 | 钱包余额手填 / 剪贴板导入 | 手填 ISK 点「记录」，或从「钱包 → 交易记录」复制后取最新一笔余额 | `OpenOrdersPanel.qml`（「钱包余额 / 记录 / 从剪贴板导入」）← `query_dashboard_bridge.py:QueryDashboardBridge.setWalletText` / `importWalletFromClipboard` |
@@ -149,7 +152,8 @@
 | A → B 全品类价差排行 | 选起终点贸易中心与各自价格口径，点「开始计算」出排行 | `ui_qml/qml/pages/TradePage.qml`（「从」「到」「开始计算」）← `trade_bridge.py:TradeBridge.setFromIndex` / `setToIndex` / `setFromSideIndex` / `setToSideIndex` / `analyze` / `_start_rank` |
 | 切换方向 | 两个中心与各自价格类型一起对调 | `TradePage.qml`（「⇄ 切换方向」）← `trade_bridge.py:TradeBridge.swapDirection` |
 | 价格口径 | 从 A 默认「卖单」（买入要付卖单价）、到 B 默认「买单」 | `trade_bridge.py:_SIDE_LABELS`（卖单 / 买单）；`TradePage.qml` 两个下拉 |
-| 排行表列 | 中文名称 / 英文名称 / 起点价格 / 终点价格 / 价差 / 每单位体积 / 每方利润 / B侧挂单变化 / 起点日成交量 / 终点日成交量 / 加入购物车 | `ui_qml/models/trade_rank_model.py:COLUMNS` |
+| 排行表列 | 中文名称 / 英文名称 / 起点价格 / 终点价格 / 价差 / 每单位体积 / 每方利润 / B侧挂单变化 / 起点日成交量 / 终点日成交量 / 净价差 / 净每方 / 加入购物车 | `ui_qml/models/trade_rank_model.py:COLUMNS` |
+| 体积运费 | 工具栏「运费 ISK/m³」：净价差 = 价差 − 单件体积 × 每方运费，「只看赚钱的」按净价差判断；改运费只在内存重算，不重跑 SQL | `ui_qml/bridge/trade_bridge.py:TradeBridge.setFreightRate`，公式 `domain/freight.py:net_after_freight` |
 | 表头排序 | 点列头排序（再点反向） | `trade_bridge.py:TradeBridge.sortBy`；`ui_qml/models/trade_rank_model.py:TradeRankModel.sort` |
 | 筛选项 | 「只看赚钱的」+ 对手盘门槛（不限 / 两侧 ≥ 1 / ≥ 10 / ≥ 100） | `TradePage.qml`（「只看赚钱的」「（对手盘：两侧在所选价位的挂单量）」）← `trade_bridge.py:TradeBridge.setHideUnprofitable` / `setLiquidityIndex` / `_apply_filters`（档位常量 `_LIQUIDITY_LABELS`） |
 | 市场分类筛选 | 一级分类下拉 + 左树按整棵子树精确筛（两者互斥） | `TradePage.qml`（「市场分类」+ 左树）← `trade_bridge.py:TradeBridge.setCategoryIndex` / `toggleTreeNode` / `selectTreeNode` / `clearTreeSelection` |

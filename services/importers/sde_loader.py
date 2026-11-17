@@ -214,6 +214,36 @@ async def write_type_materials():
         log.info("reprocessing_materials 无数据")
 
 
+async def write_portion_sizes():
+    """回填 item.portion_size（精炼批量单位，BL-050）。
+
+    依赖 item 表（放在 ITEM_WRITERS）。批量为 1 的也写 1 而不是留 NULL：`check_portion_sizes`
+    以「无 NULL」判定就绪，留 NULL 会让每次启动都重跑。
+    """
+    async with _ref_db() as db:
+        c = await db.execute("SELECT COUNT(*) FROM item WHERE portion_size IS NULL")
+        if (await c.fetchone())[0] == 0:
+            log.info("item.portion_size 已就绪，跳过")
+            return
+
+    type_ids = await load_yaml_async("typeIDs.yaml")
+    if not type_ids:
+        log.warning("typeIDs.yaml 为空，item.portion_size 未回填")
+        return
+    updates = []
+    for tid_str, tdata in type_ids.items():
+        tid = int(tid_str) if not isinstance(tid_str, int) else tid_str
+        updates.append((max(int(tdata.get("portionSize") or 1), 1), tid))
+
+    async with _ref_db() as db:
+        for i in range(0, len(updates), BATCH_SIZE):
+            await db.executemany("UPDATE item SET portion_size = ? WHERE type_id = ?", updates[i : i + BATCH_SIZE])
+        # SDE 里没有的物品（曙光 ESI 补的少数条目）按 1 处理，避免永远 NULL
+        await db.execute("UPDATE item SET portion_size = 1 WHERE portion_size IS NULL")
+        await db.commit()
+    log.info(f"item.portion_size 回填完成 ({len(updates)} 条)")
+
+
 async def write_dogma_attributes():
     """写入 dogma_attribute 表"""
     async with _ref_db() as db:
@@ -958,6 +988,7 @@ CORE_WRITERS = [
 # 依赖 item 表的部分（必须等 items 写完 item 表后执行）
 ITEM_WRITERS = [
     ("write_meta_groups", write_meta_groups),
+    ("write_portion_sizes", write_portion_sizes),
     ("write_categories", write_categories),
 ]
 

@@ -843,8 +843,10 @@ class InventoryBridge(QObject):
     # ── 蓝图管理：价格来源（与工业页工具栏**同一份**设置）────────
 
     @Property(list, constant=True)
-    def hubs(self) -> list[str]:
-        return list(TRADE_HUBS)
+    def hubs(self) -> list[dict]:
+        from services.name_resolver import hub_options
+
+        return hub_options(TRADE_HUBS)
 
     @Property(list, constant=True)
     def priceTypes(self) -> list[dict]:

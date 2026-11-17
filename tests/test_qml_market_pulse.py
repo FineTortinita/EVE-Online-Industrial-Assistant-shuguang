@@ -29,7 +29,7 @@ from tests.qml_page_load import assert_page_loads_quietly, page_host
 
 pytestmark = pytest.mark.ui
 
-_JITA = 10000002
+_REGION = 10000016  # 曙光主市场：索巴色基所在区域
 _CARD_KEYS = (
     ("mpi", "矿物指数 (MPI)"),
     ("pppi", "初级投入品 (PPPI)"),
@@ -47,12 +47,12 @@ _CARD_KEYS = (
 class _FakeIndexService:
     """`services.market_index_service` 的替身（只用契约里的那几个函数）。"""
 
-    JITA_RID = _JITA
+    JITA_RID = _REGION
 
     def __init__(self) -> None:
         self.calls: list[tuple] = []
 
-    def get_index_cards(self, region_id: int = _JITA, _db=None) -> list[dict]:
+    def get_index_cards(self, region_id: int = _REGION, _db=None) -> list[dict]:
         self.calls.append(("cards", region_id))
         return [
             {
@@ -72,7 +72,7 @@ class _FakeIndexService:
             for index, (key, label) in enumerate(_CARD_KEYS)
         ]
 
-    def get_index_series(self, keys=None, region_id: int = _JITA, _db=None) -> list[dict]:
+    def get_index_series(self, keys=None, region_id: int = _REGION, _db=None) -> list[dict]:
         self.calls.append(("series", keys, region_id))
         # 7 个点：7 日均线的头部窗口要能算出来
         points = [{"date": f"2026-09-{day:02d}", "value": 100.0 + day * 0.5} for day in range(1, 8)]
@@ -81,6 +81,9 @@ class _FakeIndexService:
                 "key": "mpi",
                 "label": "矿物指数 (MPI)",
                 "points": points,
+                "basket_count": 8,
+                "qualified_count": 2,
+                "member_date": "2026-09-07",
                 "members": [
                     {
                         "typeId": 34,
@@ -105,15 +108,15 @@ class _FakeIndexService:
             {"key": "pppi", "label": "初级投入品 (PPPI)", "points": points, "members": []},
         ]
 
-    def get_breadth(self, region_id: int = _JITA, _db=None) -> dict:
+    def get_breadth(self, region_id: int = _REGION, _db=None) -> dict:
         self.calls.append(("breadth", region_id))
         return {"date": "2026-10-05", "advancers": 120, "decliners": 80, "unchanged": 5, "turnover": 4.0e9}
 
-    def refresh_index_daily(self, region_id: int = _JITA) -> int:
+    def refresh_index_daily(self, region_id: int = _REGION) -> int:
         self.calls.append(("refresh", region_id))
         return 29
 
-    def latest_price_day(self, region_id: int = _JITA, _db=None) -> str:
+    def latest_price_day(self, region_id: int = _REGION, _db=None) -> str:
         """磁盘缓存新鲜度检查用：固定返回最近成交日（与下面的价格数据末日一致）。"""
         self.calls.append(("latest_day", region_id))
         return "2026-10-05"
@@ -126,7 +129,7 @@ class _FakeMoversService:
         self.calls: list[dict] = []
 
     def get_movers(
-        self, days: int = 3, limit: int = 50, region_id: int = _JITA, qualified_only: bool = False, _db=None
+        self, days: int = 3, limit: int = 50, region_id: int = _REGION, qualified_only: bool = False, _db=None
     ):
         self.calls.append({"days": days, "limit": limit, "region_id": region_id, "qualified_only": qualified_only})
         return [
@@ -181,7 +184,7 @@ class _FakeChainService:
     def __init__(self) -> None:
         self.calls: list[tuple] = []
 
-    def get_transmission_chain(self, type_id: int, depth: int = 2, region_id: int = _JITA, _db=None) -> list[dict]:
+    def get_transmission_chain(self, type_id: int, depth: int = 2, region_id: int = _REGION, _db=None) -> list[dict]:
         self.calls.append((type_id, depth, region_id))
         return [
             {
@@ -222,7 +225,7 @@ class _FakeAdviceService:
     def __init__(self) -> None:
         self.calls: list[tuple] = []
 
-    def get_trade_advice(self, type_id: int, region_id: int = _JITA, *, trend_30d=None, _db=None) -> dict:
+    def get_trade_advice(self, type_id: int, region_id: int = _REGION, *, trend_30d=None, _db=None) -> dict:
         self.calls.append((int(type_id), int(region_id), trend_30d))
         return {
             "verdict": "two_sided",
@@ -246,7 +249,7 @@ class _FakeWatchlistService:
         #: 返回值：>0 = 写成功（或已存在），0 = 服务拒绝（用例据此断言失败文案）
         self.result = 1
 
-    def add_to_watchlist(self, type_id: int, region_id: int = _JITA, note: str = "") -> int:
+    def add_to_watchlist(self, type_id: int, region_id: int = _REGION, note: str = "") -> int:
         self.calls.append((int(type_id), int(region_id)))
         return int(self.result)
 
@@ -376,6 +379,8 @@ def test_bridge_assembles_cards_chart_movers_and_chain(qapp, stubs):
     assert bridge.selectedKey == ""
     assert [row["name"] for row in bridge.members] == ["三钛合金", "类晶体胶矿"]
     assert "矿物指数 (MPI)" in bridge.membersNote
+    assert "本地篮子 8 / 合格 2" in bridge.membersNote
+    assert "合格 2 / 本地篮子 8 个" in bridge.cards[0]["subtitle"]
     first = bridge.members[0]
     assert (first["weightText"], first["priceText"], first["chg30Text"]) == ("25.00%", "5.50", "+12.50%")
     assert first["capped"] is True
@@ -389,6 +394,16 @@ def test_bridge_assembles_cards_chart_movers_and_chain(qapp, stubs):
     assert [row["name"] for row in bridge.members] == ["三钛合金", "类晶体胶矿"]
     bridge.selectIndex("pppi")
     assert bridge.members == [] and "暂无成分数据" in bridge.membersNote
+
+    # 大篮子不能被前20条截掉；分页后的行仍绑定当前页成员。
+    bridge._members_by_key["pppi"] = [dict(first, type_id=1000 + n, name=f"成员{n}") for n in range(45)]
+    bridge._sync_members()
+    assert bridge.memberPageCount == 3 and len(bridge.members) == 20
+    bridge.setMemberPage(2)
+    assert len(bridge.members) == 5
+    assert "41–45 / 45" in bridge.membersNote
+    bridge._members_by_key["pppi"] = []
+    bridge.setMemberPage(0)
     bridge.selectIndex("pppi")
     assert bridge.selectedKey == ""
 
@@ -409,18 +424,18 @@ def test_bridge_assembles_cards_chart_movers_and_chain(qapp, stubs):
     assert (extreme_down["chgText"], extreme_down["chg"]) == ("<-9999%", -20000.0)
     assert "窗口 3 天" in bridge.moversNote
     # 后端按契约收 kwargs（区域/窗口/上限/只看合格）
-    assert stubs.movers.calls == [{"days": 3, "limit": 50, "region_id": _JITA, "qualified_only": False}]
+    assert stubs.movers.calls == [{"days": 3, "limit": 50, "region_id": _REGION, "qualified_only": False}]
 
     # ── 数据状态行：Jita 够长、其余标黄并写明 ──
     assert bridge.statusRows[0]["text"] == "Jita：29 天 · 最后 2026-10-05"
     assert bridge.statusRows[0]["token"] == "TEXT_SECONDARY"
     assert bridge.statusRows[1]["token"] == "ACCENT_YELLOW"
-    assert "只用 Jita" in bridge.statusHint and "Amarr 6 天" in bridge.statusHint
+    assert "只用索巴色基区域" in bridge.statusHint and "Amarr 6 天" in bridge.statusHint
 
     # ── 抽屉：点异动行 → 传导链（层级/用量/成本占比/三档涨跌/未跟涨/口径）──
     assert bridge.detailOpen is False
     bridge.openMover("market", 0)
-    assert stubs.chain.calls == [(12345, 2, _JITA)]
+    assert stubs.chain.calls == [(12345, 2, _REGION)]
     assert bridge.detailOpen is True and bridge.detailTitle == "某人炒作货"
     assert "2 行" in bridge.detailStatus and "成交均价" in bridge.detailStatus
 
@@ -443,10 +458,10 @@ def test_bridge_assembles_cards_chart_movers_and_chain(qapp, stubs):
 
     # ── 篮子成员行也能点开**同一个**抽屉（用户：每行物品都要能点出挂单建议）──
     bridge.openMember(0)  # 成员表第一行：三钛合金
-    assert stubs.chain.calls[-1] == (34, 2, _JITA)
+    assert stubs.chain.calls[-1] == (34, 2, _REGION)
     assert bridge.detailOpen is True and bridge.detailTitle == "三钛合金"
     # 挂单建议一并装配（替身记下传进去的 type_id / 区域 / 大盘方向）
-    assert stubs.advice.calls[-1] == (34, _JITA, None)
+    assert stubs.advice.calls[-1] == (34, _REGION, None)
     assert bridge.advice["verdict"] == "two_sided" and bridge.advice["title"] == "两侧挂单划算"
     assert bridge.advice["metrics"][0] == {"label": "价差（卖−买）", "value": "+3.60%"}
     assert "2 行" in bridge.detailStatus and "成交均价" in bridge.detailStatus
@@ -461,15 +476,15 @@ def test_bridge_assembles_cards_chart_movers_and_chain(qapp, stubs):
 
     # 加入关注列表：替身记下传进去的 type_id + 区域
     bridge.addToWatchlist("market", 0)
-    assert stubs.watchlist.calls == [(12345, _JITA)]
+    assert stubs.watchlist.calls == [(12345, _REGION)]
     assert bridge.statusText == "已加入关注列表：某人炒作货"
     # 服务拒绝（返回 0）时状态栏必须说清原因，不能静默失败
     stubs.watchlist.result = 0
     bridge.addToWatchlist("member", 1)  # 类晶体胶矿
-    assert stubs.watchlist.calls[-1] == (35, _JITA)
+    assert stubs.watchlist.calls[-1] == (35, _REGION)
     assert "加入关注列表失败" in bridge.statusText and "类晶体胶矿" in bridge.statusText
     bridge.addToWatchlist("member", 99)  # 越界行：不调服务
-    assert stubs.watchlist.calls[-1] == (35, _JITA)
+    assert stubs.watchlist.calls[-1] == (35, _REGION)
 
     # 加入制造列表：先查蓝图（是不是产物），再落计划 —— 替身记下 type_id
     bridge.addToPlan("market", 0)  # 某人炒作货（12345）：替身里有制造蓝图
@@ -555,7 +570,7 @@ def test_fresh_disk_cache_is_default_source_without_recompute(qapp, stubs, monke
     from ui_qml.bridge.market_pulse_bridge import MarketPulseBridge
 
     cached_at = time.time() - 3600.0
-    payload = mpb._load_payload(_JITA)
+    payload = mpb._load_payload(_REGION)
     payload["_fetched_at"] = cached_at
     stubs.index.calls.clear()
     monkeypatch.setattr(mpb, "_load_cached_payload", lambda region_id: dict(payload))
@@ -569,13 +584,25 @@ def test_fresh_disk_cache_is_default_source_without_recompute(qapp, stubs, monke
     assert "数据时间" in bridge.statusText and expected_time in bridge.statusText
     assert "本地缓存" in bridge.statusText, "必须让用户知道不是实时数据"
     assert writes == [], "直接铺缓存不该回写磁盘"
-    assert f"_{_JITA}.json" in mpb._cache_path(_JITA), "缓存文件按区域区分"
+    assert f"_{_REGION}.json" in mpb._cache_path(_REGION), "缓存文件按区域区分"
 
     # 页面打开时（QML onCompleted / 外壳切页钩子）会调一次 refresh()：
     # 新鲜缓存是默认数据源 → 不得重算（60s TTL 挡住）
     bridge.refresh()
     assert bridge._loading is False and bridge._load_worker is None
     assert stubs.index.calls == []
+
+
+def test_cache_version_rejects_old_basket_counts(monkeypatch):
+    """旧版整页缓存不能掩盖新篮子数量口径。"""
+    from ui_qml.bridge import market_pulse_bridge as mpb
+
+    cached = {"fetched_at": time.time(), "payload": {"_anchor": "2026-11-17"}}
+    monkeypatch.setattr(mpb, "_read_json", lambda path: cached)
+    monkeypatch.setattr(mpb, "_latest_data_day", lambda region: "2026-11-17")
+    assert mpb._load_cached_payload(_REGION) == {}
+    cached["version"] = mpb._CACHE_VERSION
+    assert mpb._load_cached_payload(_REGION)["_anchor"] == "2026-11-17"
 
 
 def test_missing_or_stale_cache_triggers_exactly_one_refresh(qapp, stubs, monkeypatch):
@@ -597,7 +624,7 @@ def test_missing_or_stale_cache_triggers_exactly_one_refresh(qapp, stubs, monkey
     bridge.refresh()  # 页面打开那一次
     assert ran == ["PulseLoadWorker"]
     assert [card["key"] for card in bridge.cards] == [key for key, _label in _CARD_KEYS]
-    assert writes == [_JITA], "读到真实数据后写缓存，成为下次打开的默认数据源"
+    assert writes == [_REGION], "读到真实数据后写缓存，成为下次打开的默认数据源"
     assert "数据时间" in bridge.statusText
 
     bridge.refresh()  # 刚读完 60s 内切回本页：不重复读
@@ -609,7 +636,7 @@ def test_forced_index_refresh_always_recomputes_and_rewrites_cache(qapp, stubs, 
     import ui_qml.bridge.market_pulse_bridge as mpb
     from ui_qml.bridge.market_pulse_bridge import MarketPulseBridge
 
-    payload = mpb._load_payload(_JITA)
+    payload = mpb._load_payload(_REGION)
     payload["_fetched_at"] = time.time()
     stubs.index.calls.clear()
     monkeypatch.setattr(mpb, "_load_cached_payload", lambda region_id: dict(payload))
@@ -624,6 +651,6 @@ def test_forced_index_refresh_always_recomputes_and_rewrites_cache(qapp, stubs, 
 
     bridge.refreshIndex()
     assert ran == ["IndexRefreshWorker", "PulseLoadWorker"]
-    assert ("refresh", _JITA) in stubs.index.calls, "按钮必须真的重算指数"
-    assert writes == [_JITA], "重算完成后重写缓存"
+    assert ("refresh", _REGION) in stubs.index.calls, "按钮必须真的重算指数"
+    assert writes == [_REGION], "重算完成后重写缓存"
     assert "数据时间" in bridge.statusText

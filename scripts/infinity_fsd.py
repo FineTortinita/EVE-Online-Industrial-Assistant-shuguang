@@ -112,8 +112,98 @@ def to_sde_yaml(materials: dict[int, list[tuple[int, int]]]) -> dict[int, dict]:
     }
 
 
+# ── 行星工业配方 res:/staticdata/schematics.fsdbinary ───────────────────────
+#
+# 与 typematerials 同一套 FSD 布局：B+0x00 u64 桶表偏移 / u64 条目数 / u64 桶数，
+# 桶偏移 -8 处 u64 = 桶内节点数。2026-11-17 对 build 3684550 逐字节验证（68 条，
+# 68 条的 cycle_time 与曙光 ESI `/universe/schematics/{id}/` 全部一致）：
+#   节点 40B {u64 schematicID, u64 pins, u64 types, u64 未解释, u32 cycleTime, u32 nameID}
+#     pins  → 数组（-8 处 u64 = 个数），元素 u32 = 可运行该配方的设施 typeID
+#     types → **嵌套哈希表**（-8 处 u64 = 桶数，桶内节点 12B {u32 typeID, u32 quantity, u32 isInput}），
+#             typeID % 桶数 == 桶序号；isInput=1 是原料，0 是产物
+SCHEMATICS_RESOURCE = "res:/staticdata/schematics.fsdbinary"
+
+
+def parse_schematics(data: bytes) -> dict[int, dict]:
+    """schematicID → {cycle_time, inputs: [(typeID, qty)], outputs: [(typeID, qty)], pins: [typeID]}。"""
+    if len(data) < PAYLOAD_BASE + 0x18:
+        raise ValueError("文件过短")
+    B = PAYLOAD_BASE
+    (plen,) = struct.unpack_from("<Q", data, 0x18)
+    if plen != len(data) - B:
+        raise ValueError(f"payload 长度不符: {plen} != {len(data) - B}")
+
+    def u64(rel: int) -> int:
+        if rel < 0 or B + rel + 8 > len(data):
+            raise ValueError(f"越界指针 0x{rel:x}")
+        value: int = struct.unpack_from("<Q", data, B + rel)[0]
+        return value
+
+    def hashed(rel: int, fmt: str) -> list[tuple]:
+        size = struct.calcsize(fmt)
+        buckets = u64(rel - 8)
+        rows = []
+        for b in range(buckets):
+            node_rel = u64(rel + 8 * b)
+            count = u64(node_rel - 8)
+            if B + node_rel + count * size > len(data):
+                raise ValueError(f"桶越界 0x{node_rel:x}")
+            for j in range(count):
+                row = struct.unpack_from(fmt, data, B + node_rel + size * j)
+                if row[0] % buckets != b:
+                    raise ValueError(f"键 {row[0]} 不属于桶 {b}")
+                rows.append(row)
+        return rows
+
+    table_off, n_entries, _nb = struct.unpack_from("<3Q", data, B)
+    if table_off != 0x18:
+        raise ValueError("桶表头非法")
+    result: dict[int, dict] = {}
+    for sid, pins_rel, types_rel, _unknown, cycle, _name_id in hashed(table_off, "<4Q2I"):
+        if sid in result:
+            raise ValueError(f"重复 schematicID {sid}")
+        entries = hashed(types_rel, "<3I")
+        if any(flag not in (0, 1) for _t, _q, flag in entries):
+            raise ValueError(f"schematic {sid} isInput 标志非法")
+        inputs = sorted((t, q) for t, q, flag in entries if flag == 1)
+        outputs = sorted((t, q) for t, q, flag in entries if flag == 0)
+        if len(outputs) != 1 or not inputs or cycle <= 0:
+            raise ValueError(f"schematic {sid} 结构异常: in={inputs} out={outputs} cycle={cycle}")
+        pins = sorted(struct.unpack_from("<I", data, B + pins_rel + 4 * i)[0] for i in range(u64(pins_rel - 8)))
+        result[sid] = {"cycle_time": cycle, "inputs": inputs, "outputs": outputs, "pins": pins}
+    if len(result) != n_entries:
+        raise ValueError(f"条目数不符: 头部 {n_entries}, 遍历 {len(result)}")
+    return result
+
+
+def load_schematics(client_root: Path) -> tuple[dict[int, dict], dict]:
+    """client_root 指向 SharedCache/infinity；校验索引 size/MD5 后解析。"""
+    path, size, md5 = _locate(Path(client_root), SCHEMATICS_RESOURCE)
+    data = path.read_bytes()
+    if len(data) != size or hashlib.md5(data, usedforsecurity=False).hexdigest() != md5:
+        raise ValueError(f"{path} size/MD5 与索引不符")
+    result = parse_schematics(data)
+    return result, {"resource": SCHEMATICS_RESOURCE, "size": size, "md5": md5, "entryCount": len(result)}
+
+
 if __name__ == "__main__":
+    import json
     import sys
 
-    mats, meta = load_type_materials(Path(sys.argv[1] if len(sys.argv) > 1 else r"C:\Games\EVE\SharedCache\infinity"))
-    print(meta, sum(map(len, mats.values())))
+    args = sys.argv[1:]
+    if args and args[0] == "schematics":
+        # 用法：python -m scripts.infinity_fsd schematics <client_root> <输出 json>
+        from scripts.build_infinity_sde import client_build
+
+        client = Path(args[1] if len(args) > 1 else r"C:\Games\EVE\SharedCache\infinity")
+        schematics, meta = load_schematics(client)
+        meta["build"] = client_build(client)
+        payload = {"source": meta, "schematics": {str(k): v for k, v in sorted(schematics.items())}}
+        out = Path(args[2]) if len(args) > 2 else None
+        text = json.dumps(payload, ensure_ascii=False, indent=1)
+        if out:
+            out.write_text(text + "\n", encoding="utf-8")
+        print(meta)
+    else:
+        mats, meta = load_type_materials(Path(args[0] if args else r"C:\Games\EVE\SharedCache\infinity"))
+        print(meta, sum(map(len, mats.values())))

@@ -16,8 +16,23 @@ SETTINGS_PATH = os.path.join(data_dir(), "settings.json")
 
 # settings.json 结构版本：键结构变更时 +1，并在 _SETTINGS_MIGRATIONS 注册升级函数。
 # v0→v1：无实际结构变更，仅落 settings_version 键，为后续迁移留版本基准。
-SETTINGS_SCHEMA_VERSION = 1
-_SETTINGS_MIGRATIONS: dict[int, Callable[[dict], dict]] = {}
+SETTINGS_SCHEMA_VERSION = 2
+
+
+def _migrate_v1_sobaseki(data: dict) -> dict:
+    """v1→v2：曙光主贸易中心是索巴色基；旧国际服默认 Jita 改为索巴色基（issue #1）。"""
+    prices = data.get("price_settings")
+    if isinstance(prices, dict):
+        for key in ("mat_hub", "prod_hub"):
+            if prices.get(key) == "Jita":
+                prices[key] = "Sobaseki"
+    regions = data.get("update_regions")
+    if isinstance(regions, list) and "Sobaseki" not in regions:
+        data["update_regions"] = ["Sobaseki", *regions]
+    return data
+
+
+_SETTINGS_MIGRATIONS: dict[int, Callable[[dict], dict]] = {1: _migrate_v1_sobaseki}
 
 
 def _migrate_settings(data: dict) -> dict:

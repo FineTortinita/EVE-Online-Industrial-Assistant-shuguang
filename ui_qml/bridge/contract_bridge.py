@@ -22,6 +22,7 @@ from PySide6.QtCore import Property, QObject, Qt, Signal, Slot
 
 from core.constants import TRADE_HUB_IDS, TRADE_HUBS
 from core.logger import log
+from services.name_resolver import hub_options
 from ui_qml.models.contract_models import (
     AUCTION_VIEW,
     COURIER_VIEW,
@@ -179,7 +180,7 @@ class ContractBridge(QObject):
     # ═══════════════════════════════════════════════════════════
     #  星域（按名字挑，不让用户记 id）
     # ═══════════════════════════════════════════════════════════
-    regionOptions = Property(list, lambda self: list(TRADE_HUBS), constant=True)
+    regionOptions = Property(list, lambda self: [item["label"] for item in hub_options(TRADE_HUBS)], constant=True)
     regionLabel = Property(str, lambda self: self._region_label, notify=regionChanged)
     regionQuery = Property(str, lambda self: self._region_query, notify=suggestChanged)
     suggestions = Property(list, lambda self: list(self._suggestions), notify=suggestChanged)
@@ -188,7 +189,7 @@ class ContractBridge(QObject):
     def setHubIndex(self, index: int) -> None:
         """从常用贸易中心里点一个。"""
         if 0 <= index < len(TRADE_HUBS):
-            self._pick_region(TRADE_HUB_IDS[TRADE_HUBS[index]], TRADE_HUBS[index])
+            self._pick_region(TRADE_HUB_IDS[TRADE_HUBS[index]], self.regionOptions[index])
 
     @Slot(str)
     def setRegionQuery(self, text: str) -> None:

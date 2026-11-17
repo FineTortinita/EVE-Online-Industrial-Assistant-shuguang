@@ -1,10 +1,12 @@
 """
 精炼价值计算
 
-数据来源：reference.db reprocessing_materials（可精炼物料与产出）、
-market.db 价格（经 PricingService）。产率公式 calc_refining_yield 在 core.eve_formulas。
-被估算页 refine_worker 消费。
+数据来源：reference.db reprocessing_materials（可精炼物料与**每批**产出）、
+item.portion_size（批量单位）/ volume、market.db 价格（经 PricingService）。
+产率公式 calc_refining_yield 在 core.eve_formulas。被估算页 refine_worker 消费。
 """
+
+import sqlite3
 
 from core.eve_formulas import calc_refining_yield
 from services.pricing_service import PricingService
@@ -136,6 +138,11 @@ class RefiningService:
                 (type_id,),
             )
             materials = cur.fetchall()
+            portion, unit_volume = self._portion_and_volume(cur, type_id)
+
+        # 配方数量是**每批**产出（凡晶石每 100 单位一批，BL-050）；不足一批的余量游戏里不精炼
+        batches = int(quantity) // portion
+        leftover = int(quantity) - batches * portion
 
         if not materials:
             return {
@@ -145,6 +152,11 @@ class RefiningService:
                 "input_value": 0,
                 "profit": 0,
                 "margin_pct": 0,
+                "portion_size": portion,
+                "batches": 0,
+                "leftover": int(quantity),
+                "volume_m3": 0.0,
+                "value_per_m3": None,
             }
 
         output = []
@@ -152,7 +164,7 @@ class RefiningService:
         with self._db.connect("ref") as conn:
             cur = conn.cursor()
             for mat_id, mat_qty in materials:
-                qty = mat_qty * yield_rate * quantity
+                qty = mat_qty * yield_rate * batches
                 price = self._pricing.get_price(mat_id, "sell", price_hub) or 0.0
                 total = round(qty * price, 2)
                 name = resolve_item_name(cur, mat_id)
@@ -167,10 +179,15 @@ class RefiningService:
                 )
                 total_value += total
 
+        # 投入只算真正进了精炼的那部分（余量原样留在机库，不是成本）
+        refined_units = batches * portion
         input_price = self._pricing.get_price(type_id, "sell", price_hub) or 0.0
-        input_value = input_price * quantity
+        input_value = input_price * refined_units
         profit = total_value - input_value
         margin_pct = (profit / input_value * 100) if input_value > 0 else 0.0
+        # 每方化矿（参考 T2 商人助手「每方化矿计算」、开明网「精炼估值」）：
+        # 运输/采矿的硬约束是货舱容积，按「每立方米矿石精炼后值多少 ISK」比较矿种
+        volume_m3 = refined_units * unit_volume
 
         return {
             "yield_rate": round(yield_rate, 4),
@@ -179,4 +196,21 @@ class RefiningService:
             "input_value": round(input_value, 2),
             "profit": round(profit, 2),
             "margin_pct": round(margin_pct, 2),
+            "portion_size": portion,
+            "batches": batches,
+            "leftover": leftover,
+            "volume_m3": round(volume_m3, 4),
+            "value_per_m3": round(total_value / volume_m3, 2) if volume_m3 > 0 else None,
         }
+
+    @staticmethod
+    def _portion_and_volume(cur, type_id) -> tuple[int, float]:
+        """→ (批量单位, 单件体积 m³)。`portion_size` 未回填（NULL / 旧库无此列）按 1。"""
+        try:
+            row = cur.execute("SELECT portion_size, volume FROM item WHERE type_id = ?", (type_id,)).fetchone()
+        except sqlite3.OperationalError:
+            # 吞的是「旧 reference.db 还没有 portion_size 列」：迁移/初始化补上之前按旧口径（每单位）算
+            row = cur.execute("SELECT 1, volume FROM item WHERE type_id = ?", (type_id,)).fetchone()
+        if not row:
+            return 1, 0.0
+        return max(int(row[0] or 1), 1), float(row[1] or 0.0)

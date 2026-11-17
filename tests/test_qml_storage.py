@@ -1086,6 +1086,25 @@ def test_click_selects_the_row_under_the_cursor(storage_table):
 
 
 @pytest.mark.ui
+def test_header_drag_resizes_item_column(storage_table):
+    """issue #1「不能改列的宽窄」：拖表头右缘应改变该列宽度，名称列随之让出空间。"""
+    host, root, _bridge, table, _area = storage_table
+    before = root.itemColWidth(2)
+    name_before = root.itemColWidth(1)
+    header_y = table.mapToItem(root, 0.0, 0.0).y() - root.property("headerH") / 2
+    edge_x = table.mapToItem(root, 0.0, 0.0).x() + name_before + root.itemColWidth(0) + before - 2
+    start = QPoint(int(edge_x), int(header_y))
+    QTest.mousePress(host, Qt.LeftButton, Qt.NoModifier, start)
+    for step in range(1, 9):
+        QTest.mouseMove(host, start + QPoint(step * 10, 0))
+        _spin(15)
+    QTest.mouseRelease(host, Qt.LeftButton, Qt.NoModifier, start + QPoint(80, 0))
+    _spin(80)
+    assert root.itemColWidth(2) > before + 40
+    assert root.itemColWidth(1) < name_before
+
+
+@pytest.mark.ui
 def test_click_keeps_the_pressed_row_when_content_moves(storage_table):
     """回归：按下与释放之间内容移动（甩动/惯性沉降），仍应选中**按下那一刻**的行。"""
     host, root, bridge, table, _area = storage_table

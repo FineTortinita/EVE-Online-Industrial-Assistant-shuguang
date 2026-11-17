@@ -105,6 +105,33 @@ def test_yield_rate_and_ore_skill():
     assert result["yield_rate"] <= 0.85
 
 
+@pytest.mark.parametrize(
+    "units, batches, leftover, tritanium",
+    [(250, 2, 50, 400.0), (99, 0, 99, 0.0), (100, 1, 0, 200.0)],
+)
+def test_portion_size_batches_and_value_per_m3(units, batches, leftover, tritanium):
+    """BL-050：配方是每批（凡晶石 100 单位一批 → 400 三钛合金）；不足一批不精炼、不计投入。
+
+    改动前 250 单位按 250×400 = 100,000 三钛合金算（虚高 125 倍）。
+    """
+    db = FakeDB()
+    db._conn.execute("ALTER TABLE item ADD COLUMN portion_size INTEGER")
+    db._conn.execute("UPDATE item SET portion_size = 100 WHERE type_id = 1230")
+    db._conn.execute("INSERT INTO reprocessing_materials VALUES (1230, 34, 400)")
+    svc = RefiningService(db, pricing_service=FakePricing({34: 5.0, 1230: 20.0}))
+
+    r = svc.calc_value(1230, quantity=units, yield_override=0.5)  # 产率 50%：每批 200 三钛合金
+
+    assert (r["portion_size"], r["batches"], r["leftover"]) == (100, batches, leftover)
+    assert r["output"][0]["qty"] == tritanium
+    assert r["input_value"] == batches * 100 * 20.0
+    if batches:
+        assert r["volume_m3"] == pytest.approx(batches * 100 * 0.1)
+        assert r["value_per_m3"] == pytest.approx(tritanium * 5.0 / (batches * 100 * 0.1))
+    else:
+        assert r["value_per_m3"] is None
+
+
 class TestOreSkillInfo:
     """矿石专精技能解析 —— 规则全部来自 SDE 自身的命名（见 `ore_skill_info`）。"""
 

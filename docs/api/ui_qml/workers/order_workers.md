@@ -21,7 +21,7 @@ def _shared_loop() -> asyncio.AbstractEventLoop
 
 常驻事件循环（懒建，daemon 线程里 `run_forever()`）。
 
-定义行：`60`
+定义行：`59`
 
 ### `_run_loop_forever`
 
@@ -33,7 +33,7 @@ def _run_loop_forever(loop: asyncio.AbstractEventLoop, running: threading.Event)
 此函数暂无 docstring，欢迎补充。
 :::
 
-定义行：`77`
+定义行：`76`
 
 ### `_shared_client`
 
@@ -43,7 +43,7 @@ async def _shared_client() -> APIClient
 
 **只在常驻循环里调用**：懒建并进入共享 `APIClient`（session 保持打开）。
 
-定义行：`83`
+定义行：`82`
 
 ## 类
 
@@ -51,7 +51,7 @@ async def _shared_client() -> APIClient
 
 后台获取 ESI 订单数据
 
-定义行：`96`
+定义行：`95`
 
 #### 方法
 
@@ -65,7 +65,7 @@ def __init__(self, type_id: int, region_id: int=10000002, parent=None)
 此函数暂无 docstring，欢迎补充。
 :::
 
-定义行：`102`
+定义行：`101`
 ##### `run`
 
 ```python
@@ -74,7 +74,7 @@ def run(self)
 
 把取数交给常驻循环（共享 session），**边等边轮询中断**。
 
-定义行：`107`
+定义行：`106`
 ##### `_await_interruptible`
 
 ```python
@@ -83,7 +83,7 @@ def _await_interruptible(self, future: concurrent.futures.Future[tuple[list[Any]
 
 轮询等结果；期间 `requestInterruption()` 就取消并返回 None。
 
-定义行：`124`
+定义行：`123`
 ##### `_fetch_shared`
 
 ```python
@@ -92,7 +92,7 @@ async def _fetch_shared(self) -> tuple[list, list]
 
 常驻循环里跑：拿共享 client（懒建）→ 取数。session 不随本次取数关闭。
 
-定义行：`140`
+定义行：`139`
 ##### `_fetch`
 
 ```python
@@ -101,7 +101,7 @@ async def _fetch(self, client: APIClient | None=None) -> tuple[list, list]
 
 取买单 / 卖单。
 
-定义行：`144`
+定义行：`143`
 ##### `_fetch_side`
 
 ```python
@@ -110,7 +110,7 @@ async def _fetch_side(self, client: APIClient, url: str, order_type: str) -> tup
 
 取一个方向的**全部页**；返回 `(status, rows)`（02-08/02-11）。
 
-定义行：`157`
+定义行：`156`
 ##### `_fetch_orders`
 
 ```python
@@ -121,7 +121,7 @@ async def _fetch_orders(self, client: APIClient) -> tuple[list, list]
 此函数暂无 docstring，欢迎补充。
 :::
 
-定义行：`182`
+定义行：`181`
 ##### `_resolve_names`
 
 ```python
@@ -130,7 +130,7 @@ async def _resolve_names(self, location_ids: list[int], client: APIClient | None
 
 location_id → 站名：**先查本地 SDE，只有本地没有的才打 ESI**。
 
-定义行：`216`
+定义行：`215`
 ##### `_resolve_names_remote`
 
 ```python
@@ -139,7 +139,7 @@ async def _resolve_names_remote(self, client: APIClient, ids: list[int]) -> None
 
 ESI `/universe/names/` 兜底（实际只会走到玩家建筑）。
 
-定义行：`251`
+定义行：`250`
 ##### `_resolve_names_one_by_one`
 
 ```python
@@ -150,7 +150,7 @@ async def _resolve_names_one_by_one(self, client, ids: list[int], url: str) -> N
 此函数暂无 docstring，欢迎补充。
 :::
 
-定义行：`282`
+定义行：`281`
 ##### `_absorb`
 
 ```python
@@ -161,4 +161,4 @@ def _absorb(payload: list) -> None
 此函数暂无 docstring，欢迎补充。
 :::
 
-定义行：`299`
+定义行：`298`

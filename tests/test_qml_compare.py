@@ -316,7 +316,7 @@ def test_hub_and_character_choose_the_config(qapp, monkeypatch):
     dlg = _dialog(initial_items=[{"type_id": 2001, "name": "渡鸦级"}])
     try:
         bridge = dlg.bridge
-        bridge.setHubIndex(1)  # Amarr
+        bridge.setHubIndex(2)  # Amarr（首项是索巴色基）
         bridge.setCharIndex(1)  # alt
         bridge.setMe(5)
         bridge.setTe(7)
@@ -513,7 +513,7 @@ def test_open_item_detail_picks_the_dialog_by_mode(qapp, monkeypatch, mode_index
         bridge.openItemDetail(0)
 
         assert len(_RecordingDialog.calls) == 1
-        assert _RecordingDialog.calls[0]["current"]["hub"] == "Jita"
+        assert _RecordingDialog.calls[0]["current"]["hub"] == "Sobaseki"
         assert "char" in _RecordingDialog.calls[0]["current"]
         assert _RecordingDialog.calls[0]["parent"] is dlg, "二级弹窗该以宿主对话框当 parent"
     finally:

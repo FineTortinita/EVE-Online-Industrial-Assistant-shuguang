@@ -18,7 +18,7 @@ class RefineWorker(QThread):
         *,
         skills: dict | None = None,
         is_player_facility: bool = False,
-        price_hub: str = "Jita",
+        price_hub: str = "Sobaseki",
         gas_rate: float = 0.0,
         residual: bool = False,
         parent=None,
@@ -94,15 +94,23 @@ class RefineWorker(QThread):
                     "ore_is_ore": ore_is_ore,
                     "ore_skill_name": ore_skill_name,
                     "ore_skill_level": ore_skill_level,
+                    # 批量 / 每方（BL-050、每方化矿）
+                    "portion_size": result.get("portion_size", 1),
+                    "batches": result.get("batches", qty),
+                    "leftover": result.get("leftover", 0),
+                    "volume_m3": result.get("volume_m3", 0.0),
                 }
             )
 
+        total_volume = sum(float(item.get("volume_m3") or 0.0) for item in all_output)
         self.result_signal.emit(
             {
                 "items": all_output,
                 "total_input_value": round(total_input_value, 2),
                 "total_output_value": round(total_output_value, 2),
                 "total_profit": round(total_output_value - total_input_value, 2),
+                "total_volume_m3": round(total_volume, 4),
+                "value_per_m3": round(total_output_value / total_volume, 2) if total_volume > 0 else None,
                 "item_count": len(all_output),
                 "errors": errors,
             }

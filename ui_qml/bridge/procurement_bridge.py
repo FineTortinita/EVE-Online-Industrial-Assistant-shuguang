@@ -19,6 +19,7 @@ from typing import Any
 from PySide6.QtCore import Property, QObject, Signal, Slot
 
 from core.constants import TRADE_HUB_IDS
+from services.name_resolver import hub_options
 from ui_qml.bridge.summary_dialog import cell
 
 __all__ = [
@@ -201,7 +202,7 @@ class ProcurementBridge(QObject):
 
     @Property(list, constant=True)
     def hubOptions(self) -> list[dict]:
-        return [{"label": name} for name in TRADE_HUB_IDS]
+        return hub_options(list(TRADE_HUB_IDS))
 
     @Property(int, notify=stateChanged)
     def hubIndex(self) -> int:

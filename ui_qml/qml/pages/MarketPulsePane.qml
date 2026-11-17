@@ -264,7 +264,7 @@ Item {
             }
 
             Text {
-                text: qsTr("（基期=100 · 只用 Jita 成交均价）")
+                text: qsTr("（基期=100 · 索巴色基区域成交均价）")
                 color: Theme.textSecondary
                 font.family: Theme.fontFamily
                 font.pixelSize: page.fntSmall
@@ -779,6 +779,30 @@ Item {
                                             page.pulse.openMember(memberRow.index);
                                     }
                                 }
+                            }
+                        }
+
+                        Row {
+                            objectName: "memberPager"
+                            spacing: Theme.spacingSm
+                            visible: page.pulse && page.pulse.memberPageCount > 1
+                            FButton {
+                                text: qsTr("上一页")
+                                enabled: page.pulse && page.pulse.memberPage > 0
+                                onClicked: page.pulse.setMemberPage(page.pulse.memberPage - 1)
+                            }
+                            Text {
+                                text: page.pulse ? qsTr("第 %1 / %2 页").arg(page.pulse.memberPage + 1).arg(page.pulse.memberPageCount) : ""
+                                color: Theme.textSecondary
+                                font.family: Theme.fontFamily
+                                font.pixelSize: page.fntSmall
+                                height: 32
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                            FButton {
+                                text: qsTr("下一页")
+                                enabled: page.pulse && page.pulse.memberPage + 1 < page.pulse.memberPageCount
+                                onClicked: page.pulse.setMemberPage(page.pulse.memberPage + 1)
                             }
                         }
 

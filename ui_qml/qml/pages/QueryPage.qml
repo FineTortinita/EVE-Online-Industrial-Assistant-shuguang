@@ -141,6 +141,24 @@ Item {
                 }
             }
 
+            FButton {
+                objectName: "lpStoreButton"
+                text: qsTr("LP 兑换")
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("按当前价格计算各 NPC 公司 LP 兑换项的每 LP 收益")
+                onClicked: if (page.query)
+                    page.query.openLpStore()
+            }
+
+            FButton {
+                objectName: "piButton"
+                text: qsTr("行星加工")
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("按当前价格计算各行星加工配方的每小时利润（含海关税）")
+                onClicked: if (page.query)
+                    page.query.openPi()
+            }
+
             Item {
                 Layout.fillWidth: true
             }

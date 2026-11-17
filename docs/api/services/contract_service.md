@@ -207,7 +207,7 @@ def region_name(region_id: int) -> str
 
 星域显示名（中文优先）。查不到就返回 id 本身 —— 界面上总得显示点什么。
 
-定义行：`434`
+定义行：`440`
 
 ### `load_contracts`
 
@@ -219,7 +219,7 @@ def load_contracts(region_id: int, contract_type: str='all') -> list[dict]
 此函数暂无 docstring，欢迎补充。
 :::
 
-定义行：`463`
+定义行：`472`
 
 ### `load_contract_items`
 
@@ -231,4 +231,4 @@ def load_contract_items(contract_id: int) -> list[dict]
 此函数暂无 docstring，欢迎补充。
 :::
 
-定义行：`475`
+定义行：`484`

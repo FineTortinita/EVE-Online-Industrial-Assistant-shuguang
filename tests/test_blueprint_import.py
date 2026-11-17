@@ -111,6 +111,28 @@ class TestParseBlueprintClipboard:
         assert unresolved == 1
         assert [r["blueprint_type_id"] for r in result] == [3001]
 
+    @pytest.mark.parametrize("prefix", ["", "渡鸦级蓝图\t0\t0\t1\t原图\n"])
+    def test_inventory_list_aborts_before_sync(self, monkeypatch, prefix):
+        """错误复制来源须给出正确入口，并在读取库存、生成同步差异前退出。"""
+        from services import inventory_manager, ui_data_service
+        from ui_qml.workers import blueprint_import_worker as module
+
+        monkeypatch.setattr(module, "get_container", lambda: SimpleNamespace(db=None))
+        monkeypatch.setattr(
+            ui_data_service,
+            "parse_blueprint_clipboard_text",
+            lambda raw, db: ui_data_service.parse_blueprint_clipboard(raw, None),
+        )
+        monkeypatch.setattr(ui_data_service, "is_material_name", lambda *args: False)
+        monkeypatch.setattr(ui_data_service, "_lookup_bpid", lambda *args: None)
+        monkeypatch.setattr(inventory_manager, "get_blueprints", lambda _: pytest.fail("进入了同步"))
+        worker = module._BlueprintImportWorker(prefix + "主权中心蓝图\t\t主权设施蓝图\t\t\t0.01 m3\t\t", 1)
+        results = []
+        worker.finished_signal.connect(results.append)
+        worker.run()
+        assert results == [[]]
+        assert "请从游戏内制造页面复制蓝图" in worker.error_message
+
     def test_invalid_lines_skipped(self, db_manager):
         """不足 5 列 / 非数字 ME / 空行 → 跳过，不计入过滤数也不计入未识别数"""
         conn = _ref_cursor(db_manager)

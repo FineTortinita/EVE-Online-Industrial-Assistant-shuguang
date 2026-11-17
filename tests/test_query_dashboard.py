@@ -19,6 +19,7 @@ from collections.abc import Iterator
 from datetime import date, datetime, timedelta
 
 import pytest
+from PySide6.QtWidgets import QApplication
 
 import ui_qml.bridge.query_dashboard_bridge as qdb
 from services import char_capacity as cc
@@ -963,6 +964,30 @@ def test_read_orders_positions_against_local_market(h, tmp_path, monkeypatch):
     # 与 `_format_market_time` 同规则：有分秒才带 "%m-%d %H:%M"，整点只出日期
     expected_when = when.strftime("%m-%d %H:%M") if (when.hour or when.minute) else when.strftime("%m-%d")
     assert f"行情 {expected_when}" in rows[0]["cells"][1]["text"]
+
+    # 被压单（只有「不在首位」那笔）→ 给改单价 2.49；其余行不给
+    assert [r["reprice"] for r in rows] == [None, None, 2.49, None]
+    assert rows[2]["cells"][1]["text"].endswith("→ 改 2.49")
+    assert "被压单 1 笔" in bridge.openOrderSummary
+
+
+@pytest.mark.ui
+def test_double_click_copies_reprice_only_when_undercut(qapp, h, tmp_path, monkeypatch):
+    """双击被压单那行 → 剪贴板得到合法改单价；双击首位那行不覆盖剪贴板。"""
+    stamp = _fresh_market_stamp()
+    monkeypatch.setattr(
+        qdb, "_load_market_quotes", lambda records: {o: {"sell": 1234.0, "buy": 1.0, "time": stamp} for o in (21, 22)}
+    )
+    h.orders.path = _write_export(tmp_path)
+    h.orders.rows = [_order(21, is_buy=False, price=1000.0, remain=1), _order(22, is_buy=False, price=1300.0, remain=1)]
+    bridge = h.bridge()
+    bridge.readOrders()
+
+    QApplication.clipboard().setText("")
+    bridge.copyRepricePrice(False, 1)  # 1,300 被 1,234 压 → 改 1,233（4 位有效数字，不是 1,233.99）
+    assert QApplication.clipboard().text() == "1233.00"
+    bridge.copyRepricePrice(False, 0)
+    assert QApplication.clipboard().text() == "1233.00", "首位那笔不该覆盖剪贴板"
 
 
 def test_refresh_market_quotes_flips_unknown_to_position(h, tmp_path, monkeypatch):

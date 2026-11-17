@@ -52,7 +52,10 @@ def full_dbs(db_paths):
     """创建含完整数据的数据库"""
     # reference.db — item 表 ITEMS_NAMED_READY 行 + item_dogma + 扩展表
     conn = sqlite3.connect(db_paths["ref"])
-    conn.execute("CREATE TABLE item (type_id INTEGER PRIMARY KEY, en_name TEXT, zh_name TEXT, market_group_id INTEGER)")
+    conn.execute(
+        "CREATE TABLE item (type_id INTEGER PRIMARY KEY, en_name TEXT, zh_name TEXT, market_group_id INTEGER,"
+        " portion_size INTEGER DEFAULT 1)"  # 已回填批量单位（BL-050）
+    )
     for i in range(1, ITEMS_NAMED_READY + 1):
         # 前 200 行设 market_group_id（check_icons 计数用）
         mkt_grp = i if i <= 500 else None

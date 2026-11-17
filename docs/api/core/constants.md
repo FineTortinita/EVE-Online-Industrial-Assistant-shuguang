@@ -4,6 +4,16 @@
 
 > 模块说明：
 
-全局常量 — 贸易中心 ID 等
+全局常量 — 服务器端点、贸易中心 ID 等
 
-_（此模块无可公开的类或函数）_
+## 函数
+
+### `esi_url`
+
+```python
+def esi_url(path: str, **params: object) -> str
+```
+
+拼曙光 ESI URL：总是附带 datasource=infinity；值为 None 的参数丢弃。
+
+定义行：`21`

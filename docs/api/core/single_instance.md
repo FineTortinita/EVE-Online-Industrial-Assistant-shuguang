@@ -6,8 +6,8 @@
 
 Single-instance lock using PID file.
 
-默认锁文件为 `~/.eve-assistant/instance.lock`(Main.py 使用)。可传入自定义
-`lock_file` 加独立锁,例如 dev.py 用 `~/.eve-assistant/dev.lock`——启动器与
+默认锁文件为 `~/.eve-assistant-shuguang/instance.lock`(Main.py 使用)。可传入自定义
+`lock_file` 加独立锁,例如 dev.py 用 `~/.eve-assistant-shuguang/dev.lock`——启动器与
 应用实例的锁必须分离,二者才能共存。
 
 ## 函数
@@ -122,7 +122,7 @@ def _lock_payload(pid: int) -> str
 
 锁文件内容：`&#123;pid&#125;:&#123;os.name&#125;:&#123;进程创建时刻&#125;`（取不到创建时刻时第三段写 `-`）。
 
-定义行：`297`
+定义行：`298`
 
 ### `_parse_lock`
 
@@ -132,7 +132,7 @@ def _parse_lock(data: str) -> tuple[int, float | None]
 
 解析锁文件内容 → `(pid, 创建时刻或 None)`。
 
-定义行：`303`
+定义行：`304`
 
 ### `_is_reused_pid`
 
@@ -142,7 +142,7 @@ def _is_reused_pid(pid: int, stored_start: float | None) -> bool
 
 锁里的 pid 虽然活着，但它**不是**写锁的那个进程吧？—— PID 复用判定。
 
-定义行：`320`
+定义行：`321`
 
 ### `unlock`
 
@@ -152,7 +152,7 @@ def unlock(lock_file: Path | str | None=None)
 
 Release the single-instance lock.
 
-定义行：`336`
+定义行：`337`
 
 ### `show_message`
 
@@ -162,4 +162,4 @@ def show_message()
 
 Print a notice to stderr that another instance is already running.
 
-定义行：`355`
+定义行：`356`

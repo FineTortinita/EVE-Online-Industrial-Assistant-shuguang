@@ -25,7 +25,7 @@ async def init_db()
 
 初始化合同相关数据库表。
 
-定义行：`40`
+定义行：`39`
 
 ### `_contract_tables_are_stale`
 
@@ -35,7 +35,7 @@ async def _contract_tables_are_stale(db: aiosqlite.Connection) -> bool
 
 已有 public_contracts 表但缺现结构标记列 → 是旧结构，需要重建。
 
-定义行：`119`
+定义行：`118`
 
 ### `_fetch_contract_pages_detailed`
 
@@ -45,7 +45,7 @@ async def _fetch_contract_pages_detailed(session, region_id: int) -> tuple[list[
 
 拉取一个区域的全部公开合同（分页）。
 
-定义行：`129`
+定义行：`128`
 
 ### `fetch_contract_pages`
 

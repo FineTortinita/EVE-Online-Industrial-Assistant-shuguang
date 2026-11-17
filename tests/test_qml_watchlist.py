@@ -307,9 +307,10 @@ def bridge(qapp, monkeypatch):
 @pytest.mark.ui
 def test_columns_and_regions_come_from_shared_sources(bridge):
     from core.constants import TRADE_HUB_IDS
+    from services.name_resolver import hub_options
     from ui_qml.models.watchlist_models import COLUMNS
 
-    assert bridge.regions == list(TRADE_HUB_IDS.keys())
+    assert bridge.regions == [item["label"] for item in hub_options(list(TRADE_HUB_IDS))]
     assert [c["title"] for c in bridge.columns] == [t for t, _ in COLUMNS]
 
 

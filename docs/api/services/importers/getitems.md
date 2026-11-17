@@ -23,7 +23,7 @@ async def _ref_db()
 
 reference.db 写库上下文：per-DB 写锁 + 连接。
 
-定义行：`31`
+定义行：`32`
 
 ### `initialize_database`
 
@@ -33,7 +33,7 @@ async def initialize_database()
 
 初始化数据库结构
 
-定义行：`46`
+定义行：`47`
 
 ### `_build_group_lookup`
 
@@ -45,7 +45,7 @@ def _build_group_lookup(data: dict) -> dict[int, tuple[str, str]]
 此函数暂无 docstring，欢迎补充。
 :::
 
-定义行：`80`
+定义行：`82`
 
 ### `write_items`
 
@@ -55,7 +55,7 @@ async def write_items(progress_cb: Callable[[int, str], None] | None=None)
 
 从缓存的 typeIDs.yaml + groupIDs.yaml + marketGroups.yaml 批量写入 item 表
 
-定义行：`91`
+定义行：`93`
 
 ### `write_market_tree`
 
@@ -65,7 +65,7 @@ async def write_market_tree()
 
 从 marketGroups.yaml 写入 market_tree 表
 
-定义行：`180`
+定义行：`182`
 
 ### `main`
 
@@ -75,7 +75,7 @@ async def main(progress_cb: Callable[[int, str], None] | None=None)
 
 主流程：检查数据状态 → 如需更新则下载 SDE zip → 解析 YAML → 批量写入
 
-定义行：`213`
+定义行：`215`
 
 ### `fill_missing_blueprint_names`
 
@@ -85,7 +85,7 @@ async def fill_missing_blueprint_names()
 
 补充 item 表中缺失的蓝图名称
 
-定义行：`276`
+定义行：`278`
 
 ### `_esi_name`
 

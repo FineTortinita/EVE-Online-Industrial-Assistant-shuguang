@@ -291,6 +291,21 @@ def _case_market_advice(monkeypatch):
     return lambda: MarketAdviceQmlDialog(2001, "渡鸦级")
 
 
+def _case_lp_store(monkeypatch):
+    import ui_qml.bridge.lp_store_bridge as lsb
+
+    monkeypatch.setattr(lsb.LpStoreBridge, "reload", lambda self: None)  # 加载护栏不打 ESI
+    monkeypatch.setattr("services.lp_service.list_npc_corporations", lambda db: [{"id": 1000035, "name": "加达里海军"}])
+    return lambda: lsb.LpStoreQmlDialog(db=object())
+
+
+def _case_pi(monkeypatch):
+    import ui_qml.bridge.pi_bridge as pib
+
+    monkeypatch.setattr(pib.PiBridge, "reload", lambda self: None)  # 加载护栏不读真库
+    return lambda: pib.PiQmlDialog(db=object())
+
+
 _LOADS_CASES: list[tuple[str, Any]] = [
     ("编辑生产计划", "plan_edit_factory"),
     ("批量编辑生产计划", _case_plan_edit_batch),
@@ -329,6 +344,8 @@ _LOADS_CASES: list[tuple[str, Any]] = [
     ("批量对比", _case_compare),
     ("数据初始化向导", _case_init_wizard),
     ("挂单建议", _case_market_advice),
+    ("LP 兑换价值", _case_lp_store),
+    ("行星加工利润", _case_pi),
 ]
 
 

@@ -265,7 +265,7 @@ def test_defaults(qapp):
         assert bridge.treeRows == []
         assert bridge.emptyText == "没有数据"
         # 内联设置：默认值来自 `mfg_browser_settings.json` 缺失时的兜底
-        assert bridge.hubs == list(mi.TRADE_HUBS)
+        assert bridge.hubs == [item["label"] for item in mi.hub_options(mi.TRADE_HUBS)]
         assert bridge.characters == ["main", "alt"]
         assert (bridge.hubIndex, bridge.charIndex, bridge.tax) == (0, 0, 0.0)
         # 筛选器默认全部不筛（库存那一栏里同时挂着蓝图/计划状态，用户要求并进同一个下拉）
@@ -305,7 +305,7 @@ def test_settings_file_is_read_when_present(qapp, tmp_path):
         bridge = dlg.bridge
         assert bridge._mfg["hub"] == "Amarr"  # type: ignore[attr-defined]
         assert bridge._mfg["char"] == "alt"  # type: ignore[attr-defined]
-        assert (bridge.hubIndex, bridge.charIndex) == (1, 1)
+        assert (bridge.hubIndex, bridge.charIndex) == (2, 1)
         assert bridge.tax == 7.5
     finally:
         dlg.deleteLater()
@@ -316,7 +316,7 @@ def test_broken_settings_file_falls_back_to_defaults(qapp, tmp_path):
     (tmp_path / "mfg_browser_settings.json").write_text("{ 不是 JSON", encoding="utf-8")
     dlg = _dialog()
     try:
-        assert dlg.bridge._mfg["hub"] == "Jita"  # type: ignore[attr-defined]
+        assert dlg.bridge._mfg["hub"] == "Sobaseki"  # type: ignore[attr-defined]
     finally:
         dlg.deleteLater()
 
@@ -330,7 +330,7 @@ def test_settings_file_with_unknown_values_falls_back_to_first_entry(qapp, tmp_p
     try:
         bridge = dlg.bridge
         assert (bridge.hubIndex, bridge.charIndex) == (0, 0)
-        assert bridge._mfg["hub"] == "Jita"  # type: ignore[attr-defined]
+        assert bridge._mfg["hub"] == "Sobaseki"  # type: ignore[attr-defined]
         assert bridge._mfg["char"] == "main"  # type: ignore[attr-defined]
     finally:
         dlg.deleteLater()
@@ -477,7 +477,7 @@ def test_column_set_is_the_windows_own(qapp):
     try:
         dlg.bridge._on_items(_ROWS)  # type: ignore[attr-defined]
         titles = _titles(dlg)
-        assert titles == _full_titles("Jita")
+        assert titles == _full_titles("Sobaseki")
         for gone in ("均价", "体积", "日利润", "收益", "收入"):
             assert gone not in titles
         assert "利润/件" in titles, "这一列是卖价−成本，不再是把卖价抄一份"
@@ -529,7 +529,7 @@ def test_hub_change_relabels_the_price_columns(qapp):
     try:
         bridge = dlg.bridge
         bridge._on_items(_ROWS)  # type: ignore[attr-defined]
-        bridge.setHubIndex(1)  # Amarr
+        bridge.setHubIndex(2)  # Amarr
         assert "买价（Amarr）" in _titles(dlg)
         assert bridge._mfg["hub"] == "Amarr"  # type: ignore[attr-defined]
     finally:
@@ -1077,7 +1077,7 @@ def test_inline_hub_change_reloads_and_saves(qapp, tmp_path):
         bridge.setHubIndex(0)  # 同值：不重算
         assert bridge.statusText == "共 2 条 | 评分已计算"
 
-        bridge.setHubIndex(1)  # Amarr → 换列并重算
+        bridge.setHubIndex(2)  # Amarr → 换列并重算
         assert "买价（Amarr）" in _titles(dlg)
         assert bridge.statusText == "计算评分中..."
         saved = json.loads((tmp_path / "mfg_browser_settings.json").read_text(encoding="utf-8"))

@@ -141,10 +141,12 @@ def test_status_label_shim_keeps_the_settings_bridges_working(shell):
 def test_region_and_auto_update_text_follow_the_state(shell):
     bridge = shell._bridge
     shell._update_regions = ["Jita", "Amarr"]
-    assert bridge.regionText == "区域: Jita, Amarr"
+    assert bridge.regionText == "区域: 吉他, 阿玛尔"
+    jita = next(item for item in bridge.regions if item["name"] == "Jita")
+    assert jita == {"name": "Jita", "label": "吉他", "checked": True}
 
     shell._update_regions = ["Jita", "Amarr", "Rens", "Dodixie"]
-    assert bridge.regionText == "区域: Jita, Amarr +2"
+    assert bridge.regionText == "区域: 吉他, 阿玛尔 +2"
 
     shell._auto_update_enabled = True
     shell._update_interval_minutes = 45

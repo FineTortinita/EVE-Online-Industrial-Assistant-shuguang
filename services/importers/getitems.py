@@ -56,7 +56,8 @@ async def initialize_database():
                 market_group_id INTEGER,
                 en_market_group_name TEXT, zh_market_group_name TEXT,
                 volume REAL, iconID INTEGER,
-                meta_group_id INTEGER, category_id INTEGER
+                meta_group_id INTEGER, category_id INTEGER,
+                portion_size INTEGER
             )
         """)
         await db.execute("""

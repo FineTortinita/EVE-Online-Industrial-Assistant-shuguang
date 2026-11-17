@@ -53,6 +53,10 @@ COLUMNS: list[tuple[str, int, str | None]] = [
     # 查不到 / 本地历史过期 → `—`（`get_history_summary` 的 `stale`）。
     ("起点日成交量", 104, "vola"),
     ("终点日成交量", 104, "volb"),
+    # 体积运费（参考 T2 商人助手「体积运费」）：净价差 = 价差 − 体积 × 每方运费；
+    # 运费单价由工具栏「运费 ISK/m³」给，0 时两列与价差 / 每方利润相同。追加在末尾，不挪既有列下标。
+    ("净价差", 100, "net"),
+    ("净每方", 100, "npm3"),
     ("", 88, None),  # 加入购物车
 ]
 
@@ -63,6 +67,8 @@ _CHG_COL = 8
 #: 两端日成交量（顺序与 `COLUMNS` 一致）
 _VOLA_COL = 9
 _VOLB_COL = 10
+_NET_COL = 11
+_NPM3_COL = 12
 #: 左对齐的列（其余右对齐）
 _LEFT_COLS = {0, 1, 2}
 
@@ -88,8 +94,8 @@ def _cell_text(row: dict, col: int) -> str:
         # 近 7 日**平均**成交量（件/天）。`None` = 查不到或本地历史过期 → `—`，不用 0 冒充
         v = row.get(key)
         return f"{v:,.0f}" if isinstance(v, int | float) else DASH
-    if key == "pm3":
-        v = row.get("pm3")
+    if key in ("pm3", "npm3", "net"):
+        v = row.get(key)
         return f"{v:,.2f}" if isinstance(v, int | float) else DASH
     if key == "v":
         v = row.get("v") or 0
@@ -169,8 +175,8 @@ class TradeRankQmlModel(QAbstractTableModel):
     @staticmethod
     def _fg(row: dict, col: int) -> str:
         """只在「每方利润」「B侧挂单变化」两列给色，其余交给 QML 默认前景色。"""
-        if col == _PM3_COL:
-            v = row.get("pm3")
+        if col in (_PM3_COL, _NET_COL, _NPM3_COL):
+            v = row.get(COLUMNS[col][2] or "")
         elif col == _CHG_COL:
             v = row.get("chg")
         else:

@@ -80,7 +80,7 @@ class CompareWorker(QThread):
         self.done.emit(results)
 
     def _calc_mfg(self, tid: int, row: dict, char_cfg: dict | None):
-        hub = self._cfg.get("hub", "Jita")
+        hub = self._cfg.get("hub", "Sobaseki")
         tax = self._cfg.get("tax", 0)
         me = self._cfg.get("me", 0)
         te = self._cfg.get("te", 0)
@@ -120,8 +120,8 @@ class CompareWorker(QThread):
         )
 
     def _calc_trade(self, tid: int, row: dict, char_cfg: dict | None):
-        bh = self._cfg.get("bh", "Jita")
-        sh = self._cfg.get("sh", "Jita")
+        bh = self._cfg.get("bh", "Sobaseki")
+        sh = self._cfg.get("sh", "Sobaseki")
         bs = self._cfg.get("bs", "sell")
         ss = self._cfg.get("ss", "sell")
 
@@ -144,7 +144,7 @@ class CompareWorker(QThread):
         )
 
     def _calc_reaction(self, tid: int, row: dict, char_cfg: dict | None):
-        hub = self._cfg.get("hub", "Jita")
+        hub = self._cfg.get("hub", "Sobaseki")
         tax = self._cfg.get("tax", 0)
 
         k = f"{tid}|reaction|{hub}|{self._cfg.get('char', '')}|{self._system_id or ''}"

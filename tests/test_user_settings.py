@@ -125,6 +125,26 @@ def test_registered_migration_runs_and_keeps_unknown(settings_path, monkeypatch)
     assert data["keep"] == 1, "未知键应保留，绝不丢弃"
 
 
+def test_v1_migrates_jita_defaults_to_sobaseki(settings_path):
+    """issue #1：曙光价格基准为索巴色基；用户主动选的其它中心保留。"""
+    settings_path.write_text(
+        json.dumps(
+            {
+                "settings_version": 1,
+                "price_settings": {"mat_hub": "Jita", "prod_hub": "Amarr"},
+                "update_regions": ["Jita"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    data = us.load_settings()
+
+    assert data["price_settings"] == {"mat_hub": "Sobaseki", "prod_hub": "Amarr"}
+    assert data["update_regions"] == ["Sobaseki", "Jita"]
+    assert us.get_price_settings()["mat_hub"] == "Sobaseki"
+
+
 def test_settings_path_isolated_from_real_data():
     """回归：测试必须写临时 settings.json，绝不碰用户真实数据。
 

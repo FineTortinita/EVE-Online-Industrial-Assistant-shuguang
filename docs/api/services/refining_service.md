@@ -6,9 +6,9 @@
 
 精炼价值计算
 
-数据来源：reference.db reprocessing_materials（可精炼物料与产出）、
-market.db 价格（经 PricingService）。产率公式 calc_refining_yield 在 core.eve_formulas。
-被估算页 refine_worker 消费。
+数据来源：reference.db reprocessing_materials（可精炼物料与**每批**产出）、
+item.portion_size（批量单位）/ volume、market.db 价格（经 PricingService）。
+产率公式 calc_refining_yield 在 core.eve_formulas。被估算页 refine_worker 消费。
 
 ## 函数
 
@@ -20,7 +20,7 @@ def _ore_skill_candidates(group_en: str) -> list[str]
 
 矿石组英文名 → 可能的专精技能英文名（按优先级，取第一个在 SDE 里存在的）。
 
-定义行：`25`
+定义行：`27`
 
 ## 类
 
@@ -30,7 +30,7 @@ def _ore_skill_candidates(group_en: str) -> list[str]
 此类暂无 docstring，欢迎补充。
 :::
 
-定义行：`40`
+定义行：`42`
 
 #### 方法
 
@@ -44,7 +44,7 @@ def __init__(self, db, pricing_service=None)
 此函数暂无 docstring，欢迎补充。
 :::
 
-定义行：`41`
+定义行：`43`
 ##### `filter_refinable`
 
 ```python
@@ -53,7 +53,7 @@ def filter_refinable(self, items: list[dict]) -> list[dict]
 
 过滤出有精炼材料数据的物品。
 
-定义行：`45`
+定义行：`47`
 ##### `ore_skill_info`
 
 ```python
@@ -62,7 +62,7 @@ def ore_skill_info(self, type_id: int) -> tuple[bool, str]
 
 → `(是不是矿石, 矿石专精技能名/中文或空串)`。
 
-定义行：`59`
+定义行：`61`
 ##### `calc_value`
 
 ```python
@@ -71,4 +71,13 @@ def calc_value(self, type_id, quantity=1, *, skills=None, is_player_facility=Fal
 
 完整实现（从 scoring_service.py 迁移）。
 
-定义行：`92`
+定义行：`94`
+##### `_portion_and_volume`
+
+```python
+def _portion_and_volume(cur, type_id) -> tuple[int, float]
+```
+
+→ (批量单位, 单件体积 m³)。`portion_size` 未回填（NULL / 旧库无此列）按 1。
+
+定义行：`207`

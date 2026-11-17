@@ -40,12 +40,12 @@ def _trade(**kwargs):
 
 
 def test_mfg_defaults(qapp):
-    """不给 current：区域=Jita、人物=main、税=0（与原版控件的初始态一致）。"""
+    """不给 current：区域=Sobaseki、人物=main、税=0（与原版控件的初始态一致）。"""
     dlg = _mfg()
     try:
         assert dlg.ok(), "QML 没加载起来"
         assert dlg.windowTitle() == "制造评分设置"
-        assert dlg.get() == {"hub": "Jita", "char": "main", "tax": 0.0}
+        assert dlg.get() == {"hub": "Sobaseki", "char": "main", "tax": 0.0}
     finally:
         dlg.deleteLater()
 
@@ -65,7 +65,7 @@ def test_mfg_unknown_hub_keeps_the_first_item(qapp):
     """
     dlg = _mfg(current={"hub": "Nowhere"})
     try:
-        assert dlg.get()["hub"] == "Jita"
+        assert dlg.get()["hub"] == "Sobaseki"
     finally:
         dlg.deleteLater()
 
@@ -128,7 +128,7 @@ def test_trade_defaults(qapp):
     try:
         assert dlg.ok(), "QML 没加载起来"
         assert dlg.windowTitle() == "贸易评分设置"
-        assert dlg.get() == {"bh": "Jita", "sh": "Jita", "bs": "sell", "ss": "sell", "char": "main"}
+        assert dlg.get() == {"bh": "Sobaseki", "sh": "Sobaseki", "bs": "sell", "ss": "sell", "char": "main"}
     finally:
         dlg.deleteLater()
 
@@ -188,8 +188,8 @@ def test_get_rechecks_the_character_list(qapp, monkeypatch):
 def test_hub_change_writes_through(qapp):
     dlg = _trade()
     try:
-        dlg.bridge.setHubIndex(3)  # TRADE_HUBS 第 4 项
-        dlg.bridge.setSellHubIndex(2)
+        dlg.bridge.setHubIndex(4)  # TRADE_HUBS 第 5 项
+        dlg.bridge.setSellHubIndex(3)
         assert dlg.get()["bh"] == "Rens"
         assert dlg.get()["sh"] == "Dodixie"
     finally:

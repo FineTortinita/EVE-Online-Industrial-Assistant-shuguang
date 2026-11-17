@@ -30,7 +30,7 @@ def init_db(db_path: str)
 
 建表 / 给旧缓存库补 `cost_bonus` 列（列不存在则 ALTER，幂等）。
 
-定义行：`96`
+定义行：`97`
 
 ### `get_rig_type_ids`
 
@@ -40,7 +40,7 @@ def get_rig_type_ids(db_path: str) -> list[int]
 
 从 item 表按改装件组查询 type_id 列表
 
-定义行：`125`
+定义行：`126`
 
 ### `fetch_rig_bonuses`
 
@@ -50,7 +50,7 @@ async def fetch_rig_bonuses(client, type_id: int) -> dict | None
 
 从 ESI 获取 type 的材料/时间/成本加成
 
-定义行：`139`
+定义行：`140`
 
 ### `main`
 
@@ -60,4 +60,4 @@ async def main(progress_cb=None)
 
 初始化表 → 查已缓存 → 增量并发拉取缺失 → 写入 structure_rigs
 
-定义行：`160`
+定义行：`161`

@@ -21,6 +21,7 @@ from PySide6.QtCore import Property, QObject, Signal, Slot
 
 from core.constants import TRADE_HUB_IDS
 from core.logger import log
+from services.name_resolver import hub_options
 from ui_qml.bridge.all_items_bridge import market_tree_rows, subtree_ids, visible_tree_rows
 from ui_qml.models.trade_rank_model import COLUMNS, TradeRankQmlModel
 
@@ -79,7 +80,7 @@ class TradeBridge(QObject):
         super().__init__(parent)
         self._shell = shell
 
-        self._from_index = _HUBS.index("Jita")
+        self._from_index = _HUBS.index("Sobaseki")
         self._to_index = _HUBS.index("Amarr")
         self._from_side = 0  # 卖单
         self._to_side = 1  # 买单
@@ -91,6 +92,8 @@ class TradeBridge(QObject):
         self._hide_unprofitable = True
         #: 「只看有对手盘的」档位下标（见 `_LIQUIDITY_THRESHOLDS`）
         self._liquidity_index = _LIQUIDITY_DEFAULT
+        #: 体积运费 ISK/m³（0 = 不计）；改它只重算净值列，不重跑 SQL
+        self._freight_rate = 0.0
 
         self._model = TradeRankQmlModel()
         #: 全量结果（未筛选）。筛选在内存里做 —— 切筛选项不必重算 SQL
@@ -138,7 +141,7 @@ class TradeBridge(QObject):
     #  工具栏
     # ═══════════════════════════════════════════════════════════
 
-    hubs = Property(list, lambda self: list(_HUBS), constant=True)
+    hubs = Property(list, lambda self: [item["label"] for item in hub_options(_HUBS)], constant=True)
     sideLabels = Property(list, lambda self: list(_SIDE_LABELS), constant=True)
     categories = Property(list, lambda self: list(self._categories), constant=True)
     columns = Property(
@@ -285,11 +288,29 @@ class TradeBridge(QObject):
             self._liquidity_index = index
             self._apply_filters()
 
+    freightRate = Property(float, lambda self: self._freight_rate, notify=stateChanged)
+
+    @Slot(float)
+    def setFreightRate(self, rate: float) -> None:
+        rate = max(0.0, float(rate or 0.0))
+        if abs(rate - self._freight_rate) > 1e-9:
+            self._freight_rate = rate
+            self._apply_filters()
+
     def _apply_filters(self) -> None:
         """按筛选项从全量结果里挑出可见行（内存里做，不重算 SQL）。"""
+        from domain.freight import net_after_freight
+
+        for r in self._rows:
+            r["net"], r["npm3"] = net_after_freight(
+                float(r.get("spread") or 0), float(r.get("v") or 0), self._freight_rate
+            )
         rows = self._rows
         if self._hide_unprofitable:
-            rows = [r for r in rows if float(r.get("spread") or 0) > 0]
+            # 计了运费就按净价差判「赚钱」：扣完运费亏的单不该留在表里；体积未知（净值 None）的保留
+            rows = [
+                r for r in rows if float(r.get("spread") or 0) > 0 and (r.get("net") is None or float(r["net"]) > 0)
+            ]
         threshold = _LIQUIDITY_THRESHOLDS[self._liquidity_index]
         if threshold:
             # 两侧都要有对手盘：A 侧买得到、B 侧卖得掉，缺一边这单就成不了
@@ -429,7 +450,8 @@ class TradeBridge(QObject):
         age_a = times.get(TRADE_HUB_IDS[hub_a])
         age_b = times.get(TRADE_HUB_IDS[hub_b])
         # 只报「本地这份快照是什么时候拉的」—— 本页不刷新，不做任何新鲜度判断
-        return f"{count}  ·  {hub_a} {_age_text(age_a)} / {hub_b} {_age_text(age_b)}"
+        label_a, label_b = (item["label"] for item in hub_options([hub_a, hub_b]))
+        return f"{count}  ·  {label_a} {_age_text(age_a)} / {label_b} {_age_text(age_b)}"
 
     def _fetch_times(self) -> dict:
         from services.market_browser_service import fetch_hub_fetch_time

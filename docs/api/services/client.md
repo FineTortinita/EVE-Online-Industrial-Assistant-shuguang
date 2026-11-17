@@ -8,6 +8,28 @@
 
 ## 函数
 
+### `_wait_error_window`
+
+```python
+async def _wait_error_window() -> None
+```
+
+::: warning ⚠️ 待补 docstring
+此函数暂无 docstring，欢迎补充。
+:::
+
+定义行：`71`
+
+### `_note_error_limit`
+
+```python
+def _note_error_limit(headers) -> None
+```
+
+读 `X-Esi-Error-Limit-Remain/Reset`；余量低时登记全局暂停。
+
+定义行：`77`
+
 ### `_is_market_order_url`
 
 ```python
@@ -16,7 +38,7 @@ def _is_market_order_url(url: str) -> bool
 
 订单路由（归 `market-order` 组，2 tokens/2XX）；history/prices 等不归组。
 
-定义行：`62`
+定义行：`90`
 
 ### `_rate_remaining`
 
@@ -26,7 +48,7 @@ def _rate_remaining(headers) -> int | None
 
 `X-Ratelimit-Remaining` → int（缺失/非法 → None）。
 
-定义行：`67`
+定义行：`95`
 
 ### `_rate_reset_seconds`
 
@@ -36,7 +58,7 @@ def _rate_reset_seconds(headers) -> int | None
 
 `X-Ratelimit-Reset`（距窗口重置的秒数）→ int（缺失/非法 → None）。
 
-定义行：`75`
+定义行：`103`
 
 ## 类
 
@@ -51,7 +73,7 @@ burst 为瞬时突发上限（桶容量）。
 多个 asyncio.run 复用，重试不会抛 "bound to a different event loop"），
 同时线程安全。
 
-定义行：`16`
+定义行：`17`
 
 #### 方法
 
@@ -65,7 +87,7 @@ def __init__(self, rate: float=20.0, burst: int=40)
 此函数暂无 docstring，欢迎补充。
 :::
 
-定义行：`27`
+定义行：`28`
 ##### `acquire`
 
 ```python
@@ -74,7 +96,7 @@ async def acquire(self) -> None
 
 获取一个令牌（不足时按速率等待）
 
-定义行：`34`
+定义行：`35`
 ##### `rate`
 
 ```python
@@ -85,13 +107,13 @@ def rate(self) -> float
 此函数暂无 docstring，欢迎补充。
 :::
 
-定义行：`48`
+定义行：`49`
 
 ### `class APIClient`
 
 异步 HTTP 客户端（含重试、并发控制、按限流组排队）
 
-定义行：`83`
+定义行：`111`
 
 #### 方法
 
@@ -105,7 +127,7 @@ def __init__(self, concurrency: int=20, timeout: int=30, user_agent: str='EveApp
 此函数暂无 docstring，欢迎补充。
 :::
 
-定义行：`86`
+定义行：`114`
 ##### `limiter`
 
 ```python
@@ -114,7 +136,7 @@ def limiter(self) -> RateLimiter
 
 共享限流器 — worker 直接用它保护裸请求
 
-定义行：`104`
+定义行：`132`
 ##### `_limiter_for`
 
 ```python
@@ -123,7 +145,16 @@ def _limiter_for(self, url: str) -> RateLimiter
 
 按 URL 选限流桶：订单路由走 `market-order` 组（02-05），其余用注入/全局桶。
 
-定义行：`108`
+定义行：`136`
+##### `_acquire`
+
+```python
+async def _acquire(self, url: str) -> None
+```
+
+请求前：先等错误限额窗口（若已登记暂停），再按限流桶取令牌。
+
+定义行：`145`
 ##### `__aenter__`
 
 ```python
@@ -134,7 +165,7 @@ async def __aenter__(self)
 此函数暂无 docstring，欢迎补充。
 :::
 
-定义行：`117`
+定义行：`150`
 ##### `__aexit__`
 
 ```python
@@ -145,7 +176,7 @@ async def __aexit__(self, *exc)
 此函数暂无 docstring，欢迎补充。
 :::
 
-定义行：`127`
+定义行：`161`
 ##### `_handle_rate_limit`
 
 ```python
@@ -154,16 +185,17 @@ async def _handle_rate_limit(resp: aiohttp.ClientResponse)
 
 处理 ESI 429 限流（02-05）。
 
-定义行：`132`
+定义行：`166`
 ##### `_note_rate_headers`
 
 ```python
 def _note_rate_headers(url: str, headers) -> None
 ```
 
-读 `X-Ratelimit-*`（02-05）：余量低时告警，便于定位「快打满」的批次。
+读 `X-Ratelimit-*`（02-05）：余量低时告警，便于定位「快打满」的批次；
+同时读曙光的错误限额头（见 `_note_error_limit`）。
 
-定义行：`151`
+定义行：`189`
 ##### `fetch`
 
 ```python
@@ -172,7 +204,7 @@ async def fetch(self, url: str) -> dict | None
 
 GET 请求，返回解析后的 JSON，404/超时返回 None
 
-定义行：`164`
+定义行：`204`
 ##### `fetch_raw`
 
 ```python
@@ -181,7 +213,7 @@ async def fetch_raw(self, url: str) -> list | None
 
 GET 请求，返回原始 JSON（列表响应，如订单簿页），404/超时返回 None
 
-定义行：`195`
+定义行：`235`
 ##### `fetch_state`
 
 ```python
@@ -190,7 +222,7 @@ async def fetch_state(self, url: str) -> tuple[int | None, list | None, dict]
 
 GET 列表响应，返回**三态**（02-08）：
 
-定义行：`222`
+定义行：`262`
 ##### `get_headers`
 
 ```python
@@ -199,7 +231,7 @@ async def get_headers(self, url: str) -> dict[str, str] | None
 
 GET 请求，返回响应头（X-Pages 等）；非 200 返回 None
 
-定义行：`259`
+定义行：`299`
 ##### `fetch_required`
 
 ```python
@@ -208,7 +240,7 @@ async def fetch_required(self, url: str)
 
 GET 请求，失败时抛出异常
 
-定义行：`280`
+定义行：`321`
 ##### `post`
 
 ```python
@@ -217,7 +249,7 @@ async def post(self, url: str, json: dict | list | None=None)
 
 POST JSON 请求，返回解析后的 JSON；404/超时返回 None。
 
-定义行：`301`
+定义行：`343`
 ##### `get_text`
 
 ```python
@@ -226,4 +258,4 @@ async def get_text(self, url: str) -> str | None
 
 GET 请求，返回原始文本
 
-定义行：`323`
+定义行：`366`

@@ -34,8 +34,28 @@ RowLayout {
 
     spacing: Theme.spacingXs
 
+    readonly property int longestHubChars: {
+        var n = 0
+        for (var i = 0; i < hubs.length; ++i) {
+            var h = hubs[i]
+            n = Math.max(n, String(typeof h === "object" ? h.label : h).length)
+        }
+        return n
+    }
+
+    function hubValue(i: int): string {
+        var h = root.hubs[i]
+        return typeof h === "object" ? h.value : h
+    }
+
     function applySettings(hubValue: string, typeValue: string, multValue: real): void {
-        var hi = root.hubs.indexOf(hubValue)
+        var hi = -1
+        for (var j = 0; j < root.hubs.length; ++j) {
+            if (root.hubValue(j) === hubValue) {
+                hi = j
+                break
+            }
+        }
         if (hi >= 0 && hi !== hubCombo.currentIndex)
             hubCombo.currentIndex = hi
         var ti = 0
@@ -65,9 +85,12 @@ RowLayout {
     FComboBox {
         id: hubCombo
         model: root.hubs
+        textRole: root.hubs.length && typeof root.hubs[0] === "object" ? "label" : ""
         implicitHeight: root.controlHeight
-        implicitWidth: Math.max(80, maxItemWidth + 2 * Theme.spacingLg)
-        onActivated: root.hubEdited(currentText)
+        // 中文中心名（如「索巴色基」）按最长条目留宽，避免测宽时 textRole 尚未生效导致截断
+        // 按最长标签字符数估宽（不在绑定里改 TextMetrics.text，避免绑定循环）
+        implicitWidth: Math.max(80, maxItemWidth, root.longestHubChars * Theme.fs(13)) + 2 * Theme.spacingLg + Theme.fs(16)
+        onActivated: root.hubEdited(root.hubValue(currentIndex))
     }
 
     FComboBox {

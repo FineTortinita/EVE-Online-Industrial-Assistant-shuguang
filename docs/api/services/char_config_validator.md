@@ -36,7 +36,7 @@ def _migrate_legacy_skill_keys(skills: dict) -> None
 
 把旧技能名的等级搬到现行名下（就地修改，幂等）。
 
-定义行：`255`
+定义行：`257`
 
 ### `load_char_config`
 
@@ -46,4 +46,4 @@ def load_char_config(path: str) -> dict
 
 读取、校验、迁移一站式函数。
 
-定义行：`264`
+定义行：`266`

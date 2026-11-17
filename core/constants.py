@@ -29,6 +29,8 @@ def esi_url(path: str, **params: object) -> str:
 
 # 五大贸易中心 region_id
 TRADE_HUB_IDS = {
+    #: 曙光主贸易中心（Lonetrek）。首项是材料/成品价格的默认基准。
+    "Sobaseki": 10000016,
     "Jita": 10000002,
     "Amarr": 10000043,
     "Dodixie": 10000032,
@@ -41,6 +43,7 @@ TRADE_HUBS = list(TRADE_HUB_IDS.keys())  # ["Jita", "Amarr", "Dodixie", "Rens"]
 
 # 贸易中心 → 太阳系 ID（SCI 查询用；避免多处重复定义）
 TRADE_HUB_SYSTEM_IDS: dict[str, int] = {
+    "Sobaseki": 30001363,
     "Jita": 30000142,
     "Amarr": 30002187,
     "Dodixie": 30002659,

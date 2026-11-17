@@ -228,8 +228,10 @@ class IndustryBridge(QObject):
     # ── 价格来源 ──────────────────────────────────────────────
 
     @Property(list, constant=True)
-    def hubs(self) -> list[str]:
-        return list(TRADE_HUBS)
+    def hubs(self) -> list[dict]:
+        from services.name_resolver import hub_options
+
+        return hub_options(TRADE_HUBS)
 
     @Property(list, constant=True)
     def priceTypes(self) -> list[dict]:

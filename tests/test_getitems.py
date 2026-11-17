@@ -69,7 +69,7 @@ class TestInitializeDatabase:
 
     @pytest.mark.asyncio
     async def test_item_table_columns(self, temp_db_path):
-        """item 表包含预期的全部 13 列
+        """item 表包含预期的全部 14 列
 
         meta_group_id / category_id 必须在 CREATE 里就有：sde_core 与 items 两步并行，
         靠 sde_loader 的 ALTER 补列时若 items 还没建表，补列会被跳过 —— 建表即带列
@@ -96,6 +96,7 @@ class TestInitializeDatabase:
             "iconID",
             "meta_group_id",
             "category_id",
+            "portion_size",  # BL-050：精炼批量单位
         ]
 
 

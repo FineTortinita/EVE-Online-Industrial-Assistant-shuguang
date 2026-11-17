@@ -491,7 +491,7 @@ class IndustryPage(QObject):
         """
         ps = get_price_settings()
         return (
-            TRADE_HUB_IDS.get(str(ps.get("mat_hub") or ""), 10000002),
+            TRADE_HUB_IDS.get(str(ps.get("mat_hub") or ""), TRADE_HUB_IDS["Sobaseki"]),
             ps.get("mat_price_type") or "sell",
             round(float(ps.get("mat_mult") or 1.0), 4),
             _default_mat_hangar_id(),
@@ -629,10 +629,10 @@ class IndustryPage(QObject):
         """
         ps = get_price_settings()
         return (
-            ps.get("mat_hub") or "Jita",
+            ps.get("mat_hub") or "Sobaseki",
             ps.get("mat_price_type") or "sell",
             round(float(ps.get("mat_mult") or 1.0), 4),
-            ps.get("prod_hub") or "Jita",
+            ps.get("prod_hub") or "Sobaseki",
             ps.get("prod_price_type") or "sell",
             round(float(ps.get("prod_mult") or 1.0), 4),
             self._price_data_fp(),

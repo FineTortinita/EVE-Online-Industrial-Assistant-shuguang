@@ -21,6 +21,21 @@ Item {
      * 别名不与 context property 同名（同名声明会遮蔽它，恒为 null 且无报错）。 */
     readonly property var trade: typeof bridge !== "undefined" ? bridge : null
 
+    // 保留模型列号（排序/金额/购物车仍用原索引），英文列只从展示移除。
+    property var resizedWidths: ({})
+    function colWidth(col) {
+        if (col === 2) return 0
+        const cols = page.trade ? page.trade.columns : []
+        return resizedWidths[col] !== undefined ? resizedWidths[col]
+             : (col < cols.length ? cols[col].width : 100)
+    }
+    function resizeColumn(col, width) {
+        const next = Object.assign({}, resizedWidths)
+        next[col] = Math.max(34, width)
+        resizedWidths = next
+        rankTable.forceLayout()
+    }
+
     readonly property int fntBase: Math.round(12 * Theme.fontScale)
     readonly property int fntSmall: Math.round(11 * Theme.fontScale)
     readonly property int pad: Theme.spacingSm
@@ -171,6 +186,29 @@ Item {
                 currentIndex: page.trade ? page.trade.liquidityIndex : 0
                 onActivated: if (page.trade)
                     page.trade.setLiquidityIndex(currentIndex)
+            }
+
+            Text {
+                text: qsTr("运费 ISK/m³:")
+                color: Theme.textPrimary
+                font.family: Theme.fontFamily
+                font.pixelSize: page.fntBase
+                height: 28
+                verticalAlignment: Text.AlignVCenter
+            }
+
+            FDoubleSpinBox {
+                objectName: "freightRateBox"
+                from: 0.0
+                to: 100000.0
+                stepSize: 100.0
+                decimals: 0
+                implicitWidth: 110
+                value: page.trade ? page.trade.freightRate : 0.0
+                onValueModified: if (page.trade)
+                    page.trade.setFreightRate(value)
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("按体积扣运费：净价差 = 价差 − 单件体积 × 每方运费。0 = 不计运费")
             }
 
             Text {
@@ -346,6 +384,7 @@ Item {
                 anchors.top: parent.top
                 height: Math.max(24, page.fntSmall + 12)
                 syncView: rankTable
+                interactive: false
                 clip: true
                 /* ⚠️ `textRole` 必须是模型 `roleNames()` 里**真有**的角色。
                  * 写 Qt 保留的 `"display"` 会每帧刷一条
@@ -419,6 +458,11 @@ Item {
                         onClicked: if (page.trade)
                             page.trade.sortBy(headCell.index)
                     }
+                    FColumnResizeHandle {
+                        objectName: "tradeResize" + headCell.index
+                        columnWidth: page.colWidth(headCell.index)
+                        onResized: function(w) { page.resizeColumn(headCell.index, w) }
+                    }
                 }
             }
 
@@ -437,16 +481,15 @@ Item {
                 // 1.2 万行量级，必须复用 delegate，否则光建项就卡死
                 reuseItems: true
                 rowHeightProvider: function (row) { return 26 }
-                columnWidthProvider: function (col) {
-                    const cols = page.trade ? page.trade.columns : [];
-                    return col < cols.length ? cols[col].width : 100;
-                }
+                columnWidthProvider: page.colWidth
 
                 /* 列比窗口宽时要能横向滚 —— 加了「两端日成交量」之后列总宽约 1330，
                  * 1500 宽的窗口里表格区只有 1000 出头，没有横向滚动条就会把最后两列
                  * （终点日成交量、加入购物车）直接切掉（出图核对时发现）。 */
                 ScrollBar.horizontal: ScrollBar {
+                    objectName: "horizontalScroll"
                     policy: ScrollBar.AsNeeded
+                    active: true
                 }
                 ScrollBar.vertical: ScrollBar {
                     policy: ScrollBar.AsNeeded

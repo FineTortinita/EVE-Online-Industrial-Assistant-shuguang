@@ -4,19 +4,24 @@
 
 > 模块说明：
 
-从 ESI 导入角色技能 —— OAuth PKCE + 回环回调 + 拉取。
+从曙光 ESI 导入角色技能 —— OAuth PKCE + 手动粘贴回跳地址 + 拉取。
 
 **为什么在 `ui_qml/workers/` 而不是 `services/`**：整套流程只有一个调用方
 （人物设置对话框的导入按钮），按本仓克制条款第 1 条不足以新开服务模块；而
 「UI 异步 = QThread + Signal」的既定位置就是这里，且已有 worker 直连 ESI 的先例
 （`ui_qml/workers/order_workers.py`）。
 
-**安全口径**：走 PKCE 公共客户端，**不带 client_secret** —— 官方 PKCE 示例明写
-「we do not use the client secret in this flow」。`CLIENT_ID` 按公共客户端设计就是
-公开的，可以内置；secret 一律不落代码、不落库。
+**为什么是「粘贴回跳地址」而不是本地回环回调**（2026-11-16 调研，见 docs/dev/decisions.md）：
+网易没有公开的曙光开发者门户，无法为本应用注册 client_id 和 localhost 回调。现有曙光
+第三方工具（开明网、eve.navexor.top）都复用网易官方 ESI 文档页内置的公共客户端
+`bc90aa49…`，其回调固定为官方的 `https://ali-esi.evepc.163.com/ui/oauth2-redirect.html`。
+那个页面脱离文档页打开时是空白页，授权码留在地址栏里 —— 用户把地址栏复制回来即可。
 
-**一次授权 = 一个角色**：令牌 `sub` 是 `CHARACTER:EVE:<id>`，用户在 CCP 页面上
-选角色。多账号 / 一账号多角色 = 每个角色各点一次导入。
+**安全口径**：走 PKCE 公共客户端，**不带 client_secret**；`state` 在本地生成并逐字校验，
+粘贴进来的地址必须是官方回调页，否则拒绝（防止把别处的 code 塞进来）。
+
+**一次授权 = 一个角色**：令牌 `sub` 形如 `CHARACTER:<租户>:<id>`，用户在网易页面上选角色。
+多账号 / 一账号多角色 = 每个角色各点一次导入。
 
 ## 函数
 
@@ -28,7 +33,7 @@ def _utc_now() -> str
 
 ESI 同款格式的 UTC 时间串。同格式 ISO8601 按字典序比较即等价于按时间比较。
 
-定义行：`106`
+定义行：`115`
 
 ### `_utc_after`
 
@@ -40,7 +45,7 @@ def _utc_after(seconds: int) -> str
 此函数暂无 docstring，欢迎补充。
 :::
 
-定义行：`111`
+定义行：`120`
 
 ### `_token_conn`
 
@@ -50,7 +55,7 @@ def _token_conn()
 
 打开 esi_tokens 所在连接。
 
-定义行：`118`
+定义行：`127`
 
 ### `load_token_row`
 
@@ -60,7 +65,7 @@ def load_token_row(character_name: str) -> dict | None
 
 按角色名取绑定行（token 按角色绑定，名字是配置里的匹配键）。
 
-定义行：`137`
+定义行：`146`
 
 ### `list_token_rows`
 
@@ -70,7 +75,7 @@ def list_token_rows() -> list[dict]
 
 全部已绑定角色 —— ESI 钱包/挂单同步要遍历每个角色各拉一份。
 
-定义行：`150`
+定义行：`159`
 
 ### `save_token_row`
 
@@ -80,7 +85,7 @@ def save_token_row(character_id: int, character_name: str, refresh_token: str, a
 
 写入/更新绑定行。
 
-定义行：`160`
+定义行：`169`
 
 ### `delete_token_row`
 
@@ -90,7 +95,7 @@ def delete_token_row(character_id: int) -> None
 
 授权被撤销时清掉这一行（留着只会每次刷新都失败）。
 
-定义行：`191`
+定义行：`200`
 
 ### `_pkce_pair`
 
@@ -100,7 +105,7 @@ def _pkce_pair() -> tuple[str, str]
 
 生成 (code_verifier, code_challenge)，与官方 PKCE 示例一致。
 
-定义行：`204`
+定义行：`213`
 
 ### `_jwt_claims`
 
@@ -110,7 +115,17 @@ def _jwt_claims(access_token: str) -> dict
 
 解出 JWT 载荷，**不验签**。
 
-定义行：`211`
+定义行：`220`
+
+### `_check_claims`
+
+```python
+def _check_claims(claims: dict, now_ts: float | None=None) -> None
+```
+
+校验曙光签发方、有效期与客户端声明；声明检查不等同于签名验证。
+
+定义行：`237`
 
 ### `_character_from_claims`
 
@@ -118,33 +133,39 @@ def _jwt_claims(access_token: str) -> dict
 def _character_from_claims(claims: dict, fallback_id: int | None, fallback_name: str | None) -> tuple[int, str]
 ```
 
-::: warning ⚠️ 待补 docstring
-此函数暂无 docstring，欢迎补充。
-:::
+`sub` 形如 `CHARACTER:<租户>:<id>`（国际服租户是 EVE；曙光的租户名以实测为准，只要求 CHARACTER 前缀）。
 
-定义行：`224`
+定义行：`256`
 
-### `_start_callback_server`
+### `parse_redirect`
 
 ```python
-def _start_callback_server() -> _CallbackServer
+def parse_redirect(pasted: str, expected_state: str) -> str
 ```
 
-::: warning ⚠️ 待补 docstring
-此函数暂无 docstring，欢迎补充。
-:::
+校验用户粘贴的回跳地址并取出授权码。
 
-定义行：`275`
+定义行：`273`
+
+### `_fetch_device_id`
+
+```python
+async def _fetch_device_id(session: aiohttp.ClientSession) -> str
+```
+
+向网易申请一次性设备 ID（授权地址必带）。失败抛 RuntimeError（文案给用户看）。
+
+定义行：`304`
 
 ### `_authorize_url`
 
 ```python
-def _authorize_url(code_challenge: str, state: str, extra_scopes: tuple[str, ...]=()) -> str
+def _authorize_url(code_challenge: str, state: str, extra_scopes: tuple[str, ...]=(), *, device_id: str='') -> str
 ```
 
-授权页 URL。`extra_scopes` 给「按开关才要的权限」用。
+浏览器要打开的地址：先经网易 `/account/logoff` 登出残留会话，再回跳授权页。
 
-定义行：`281`
+定义行：`330`
 
 ### `_post_token`
 
@@ -154,7 +175,7 @@ async def _post_token(client, data: dict) -> dict
 
 POST 到 token 端点。
 
-定义行：`302`
+定义行：`358`
 
 ### `_get_json`
 
@@ -165,7 +186,7 @@ async def _get_json(client, url: str, token: str, *, scope_hint: str='技能/增
 带 Bearer 的 GET。自己看状态码 —— `APIClient.fetch` 把 401/403 都吞成 None，
 而我们必须把「授权失效」和「缺 scope」分开告诉用户。
 
-定义行：`335`
+定义行：`391`
 
 ### `_resolve_skill_names`
 
@@ -175,7 +196,7 @@ def _resolve_skill_names(skill_ids: list[int]) -> dict[int, str]
 
 skill_id → 中文名（ESI 的 skill_id 就是 SDE 的 type_id）。
 
-定义行：`362`
+定义行：`418`
 
 ## 类
 
@@ -183,13 +204,13 @@ skill_id → 中文名（ESI 的 skill_id 就是 SDE 的 type_id）。
 
 用户关掉了对话框 —— 不是错误，不要发信号。
 
-定义行：`80`
+定义行：`89`
 
 ### `class _TokenError`（继承 `RuntimeError`）
 
 token 端点返回非 200。`code` 是 OAuth 的 error 字段（如 invalid_grant）。
 
-定义行：`84`
+定义行：`93`
 
 #### 方法
 
@@ -203,59 +224,19 @@ def __init__(self, code: str, desc: str, status: int) -> None
 此函数暂无 docstring，欢迎补充。
 :::
 
-定义行：`87`
+定义行：`96`
 
 ### `class EsiAuthRevoked`（继承 `RuntimeError`）
 
 401：令牌失效或授权已被撤销，需要用户重新授权。
 
-定义行：`95`
+定义行：`104`
 
 ### `class EsiScopeMissing`（继承 `RuntimeError`）
 
 403：令牌有效但缺 scope。
 
-定义行：`99`
-
-### `class _CallbackServer`（继承 `HTTPServer`）
-
-一次性回环回调服务器。
-
-`timeout` 必须是**亚秒级**：`ui_qml/workers/lifecycle.detach_worker` 只等 500ms，
-超时设大了每次关窗都会把一个阻塞在 `handle_request()` 的线程漏在外面。
-
-定义行：`236`
-
-### `class _CallbackHandler`（继承 `BaseHTTPRequestHandler`）
-
-::: warning ⚠️ 待补 docstring
-此类暂无 docstring，欢迎补充。
-:::
-
-定义行：`248`
-
-#### 方法
-
-##### `do_GET`
-
-```python
-def do_GET(self) -> None
-```
-
-::: warning ⚠️ 待补 docstring
-此函数暂无 docstring，欢迎补充。
-:::
-
-定义行：`251`
-##### `log_message`
-
-```python
-def log_message(self, *args: object) -> None
-```
-
-默认实现会往 stderr 打日志；本地一次性回调不需要这些噪音。
-
-定义行：`271`
+定义行：`108`
 
 ### `class EsiSkillImportWorker`（继承 `QThread`）
 
@@ -264,7 +245,7 @@ def log_message(self, *args: object) -> None
 产出 `result_signal` 的载荷：`&#123;character_id, character_name, skills: &#123;中文名: 等级&#125;, implants: [type_id]&#125;`。
 **worker 不写 char_config** —— 只回数据，由主线程的桥合并落盘，保证配置只有一个写者。
 
-定义行：`380`
+定义行：`436`
 
 #### 方法
 
@@ -278,7 +259,16 @@ def __init__(self, character_name: str | None=None, *, force_browser: bool=False
 此函数暂无 docstring，欢迎补充。
 :::
 
-定义行：`390`
+定义行：`449`
+##### `submit_redirect`
+
+```python
+def submit_redirect(self, text: str | None) -> None
+```
+
+主线程调用：交回用户粘贴的回跳地址（None = 取消）。线程安全。
+
+定义行：`461`
 ##### `run`
 
 ```python
@@ -289,7 +279,7 @@ def run(self) -> None
 此函数暂无 docstring，欢迎补充。
 :::
 
-定义行：`401`
+定义行：`468`
 ##### `_import`
 
 ```python
@@ -300,7 +290,7 @@ async def _import(self) -> dict
 此函数暂无 docstring，欢迎补充。
 :::
 
-定义行：`426`
+定义行：`493`
 ##### `_extra_scopes`
 
 ```python
@@ -309,7 +299,7 @@ def _extra_scopes(self) -> tuple[str, ...]
 
 「带开关的可选能力」按需追加的 scope。目前只有军团钱包一项。
 
-定义行：`437`
+定义行：`504`
 ##### `_obtain_token`
 
 ```python
@@ -318,7 +308,7 @@ async def _obtain_token(self, client, character_name: str | None=None, *, allow_
 
 有可用绑定就静默刷新，否则开浏览器授权。`force_browser` 时跳过静默路径。
 
-定义行：`452`
+定义行：`519`
 ##### `_still_valid`
 
 ```python
@@ -327,7 +317,7 @@ def _still_valid(expires_at: str | None) -> bool
 
 同格式 ISO8601 UTC 串，字典序即时间序；留 `_EXPIRY_MARGIN_S` 裕量。
 
-定义行：`490`
+定义行：`562`
 ##### `_refresh`
 
 ```python
@@ -338,7 +328,7 @@ async def _refresh(self, client, row: dict) -> tuple[str, int, str]
 此函数暂无 docstring，欢迎补充。
 :::
 
-定义行：`497`
+定义行：`569`
 ##### `_browser_authorize`
 
 ```python
@@ -349,18 +339,16 @@ async def _browser_authorize(self, client) -> tuple[str, int, str]
 此函数暂无 docstring，欢迎补充。
 :::
 
-定义行：`513`
-##### `_await_code`
+定义行：`586`
+##### `_await_redirect`
 
 ```python
-def _await_code(self, server: _CallbackServer, state: str) -> str
+def _await_redirect(self) -> str
 ```
 
-::: warning ⚠️ 待补 docstring
-此函数暂无 docstring，欢迎补充。
-:::
+阻塞等主线程交回粘贴内容；0.5s 一查中断（`detach_worker` 只等 500ms）。
 
-定义行：`540`
+定义行：`614`
 ##### `_persist`
 
 ```python
@@ -371,7 +359,7 @@ def _persist(self, payload: dict, *, previous_refresh: str | None=None, fallback
 此函数暂无 docstring，欢迎补充。
 :::
 
-定义行：`558`
+定义行：`626`
 ##### `_pull`
 
 ```python
@@ -382,4 +370,4 @@ async def _pull(self, client, access: str, char_id: int, char_name: str) -> dict
 此函数暂无 docstring，欢迎补充。
 :::
 
-定义行：`580`
+定义行：`650`

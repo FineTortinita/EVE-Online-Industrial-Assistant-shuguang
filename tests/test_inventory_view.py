@@ -475,9 +475,10 @@ class TestBatchCostPriceDialog:
             assert dlg.bridge.multiplierMax == 10.0
             # 回归：来源项早先写死「吉他卖价/买价/均价」，整个窗口钉死在吉他上，
             # 用户报「没法设置其他贸易中心的价格」。现在贸易中心由下拉选。
-            assert dlg.bridge.hubs[0] == "Jita"
-            assert dlg.hub_name() == dlg.bridge.hubs[dlg.bridge.hubIndex]
-            dlg.bridge.setHubIndex(1)
+            # 下拉显示中文（BL-048），取价仍用英文键
+            assert dlg.bridge.hubs[0] == "索巴色基"
+            assert dlg.hub_name() == "Sobaseki"
+            dlg.bridge.setHubIndex(2)
             assert dlg.hub_name() == "Amarr"
         finally:
             dlg.deleteLater()

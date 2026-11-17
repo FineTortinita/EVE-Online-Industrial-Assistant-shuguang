@@ -377,8 +377,8 @@ class PlanTableBridge(QObject):
 
         out: list[int] = []
         for col in range(NUM_COLUMNS):
-            if col == COL_PRODUCT or col in FIXED_WIDTHS:
-                out.append(0)  # 0 = 保持原值（固定窄列 / 产品列 Stretch）
+            if col in FIXED_WIDTHS:
+                out.append(0)  # 0 = 保持固定窄列的原值
                 continue
             widest = 0
             for row in range(rows):

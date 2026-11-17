@@ -88,3 +88,13 @@ def refine_total_rows(result: Mapping[str, Any]) -> list[dict]
 精炼总计 → `[&#123;"label", "valueText", "token"&#125;]`（两行：产出 / 利润）。
 
 定义行：`226`
+
+### `refine_batch_note`
+
+```python
+def refine_batch_note(result: Mapping[str, Any]) -> str
+```
+
+批量说明：配方按批计算，不足一批的余量不精炼（BL-050）。无批量概念（=1）时返回空串。
+
+定义行：`247`
