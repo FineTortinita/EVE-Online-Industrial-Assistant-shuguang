@@ -69,14 +69,23 @@ def compute_parallel_by_lines(subitems: list[dict], total_lines: int) -> list[di
 def compute_parallel_by_duration(subitems: list[dict], target_days: int) -> list[dict]:
     """按目标工期反推并行数（纯函数）。
 
-    subitems: [{id, duration_sec(单线总时长), ...}]；返回 [{id, parallels}]。
-    parallels = max(1, ceil(duration_sec / (target_days × 86400))）。
+    subitems: [{id, duration_sec(单线总时长), runs_needed?(总流程数), ...}]；返回 [{id, parallels}]。
+    给了 `runs_needed`：按整流程切，最少的并行使单线时长 ≤ 工期，且不超过流程数；
+    没给：parallels = max(1, ceil(duration_sec / (target_days × 86400)))（旧口径）。
     """
     target_secs = max(int(target_days), 1) * 86400
     result = []
     for item in subitems:
         duration = int(item.get("duration_sec") or 0)
-        parallels = 1 if duration <= 0 else max(1, math.ceil(duration / target_secs))
+        runs = int(item.get("runs_needed") or 0)
+        if duration > 0 and runs > 0:
+            # 按整流程切（一条线至少一个流程、并行不超过所需流程数）：单流程本身超过工期时
+            # 停在「每线 1 流程」，不再无谓加线（T2 同功能在这种情况下死循环，见阶段 5）
+            from domain.character_planning import parallels_by_time_limit
+
+            parallels = parallels_by_time_limit(runs, duration / 3600 / runs, target_secs / 3600, runs)
+        else:
+            parallels = 1 if duration <= 0 else max(1, math.ceil(duration / target_secs))
         result.append({"id": item["id"], "parallels": parallels})
     return result
 
@@ -182,6 +191,7 @@ class MassParallelBridge(DialogBridge):
                     "demand": net_lines * per_run,
                     "per_run": per_run,
                     "duration_sec": self._duration.get(pid, 0),
+                    "runs_needed": net_lines,
                 }
             )
         if self._is_lines():

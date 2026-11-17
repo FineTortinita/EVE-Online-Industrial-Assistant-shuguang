@@ -1032,7 +1032,10 @@ class IndustryPage(QObject):
         OutputSummaryDialog(self).show()
 
     def open_char_usage(self):
-        CharacterUsageDialog(self).show()
+        dlg = CharacterUsageDialog(self)
+        # 「按建议派人」写回人物后刷新计划表
+        dlg.bridge.plansChanged.connect(self.load_plans)
+        dlg.show()
 
     def open_industry_calc(self):
         """打开「制造计算」（开明网式，非模态独立窗，单实例复用）；加入规划后刷新计划表。"""

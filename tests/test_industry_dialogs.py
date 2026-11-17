@@ -763,6 +763,15 @@ class TestComputeParallelByDuration:
     def test_zero_duration(self):
         assert compute_parallel_by_duration([{"id": 1, "duration_sec": 0}], 5) == [{"id": 1, "parallels": 1}]
 
+    def test_whole_runs_and_run_cap(self):
+        """按整流程切：10 天 / 3 流程、工期 5 天 → 每流程 3.33 天，2 线（2 流程 6.7 天）不够 → 3 线；
+        单流程（20 天）就超工期 → 停在流程数 1，不无谓加线。"""
+        items = [
+            {"id": 1, "duration_sec": 10 * 86400, "runs_needed": 3},
+            {"id": 2, "duration_sec": 20 * 86400, "runs_needed": 1},
+        ]
+        assert {r["id"]: r["parallels"] for r in compute_parallel_by_duration(items, 5)} == {1: 3, 2: 1}
+
 
 def _build_ref(db_manager):
     with db_manager.connect("ref") as conn:

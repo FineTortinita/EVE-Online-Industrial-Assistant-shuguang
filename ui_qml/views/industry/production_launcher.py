@@ -571,6 +571,19 @@ class ProductionLauncher(QObject):
         这样「制造 13 格 / 科研 1 格」不会在一行里留下十几个空档，各行也仍能纵向对齐。
         """
         self._usage = active_lines_by_category(self._all_plans)
+        # 蓝图技能要求（人物规划，阶段 5）：每轮刷新取一次，执行人物下拉标出技能不达标的人
+        try:
+            from services.character_planning_service import required_skills
+
+            self._req_skills = required_skills(int(p.get("blueprint_type_id") or 0) for p in self._all_plans)
+            self._char_skills = {
+                n: (c or {}).get("skills", {}) or {}
+                for n, c in ((load_all_data() or {}).get("characters", {}) or {}).items()
+            }
+        except Exception:
+            # 吞的是蓝图库缺表 / 人物配置读失败：下拉不标技能，其余照常
+            log.exception("读取蓝图技能要求失败")
+            self._req_skills, self._char_skills = {}, {}
         data = load_all_data()
         chars_data = data.get("characters", {}) or {}
         chars = list(self._char_list)
@@ -938,9 +951,16 @@ class ProductionLauncher(QObject):
         if chosen and chosen not in chars:
             chars.insert(0, chosen)
         index = 0
+        from domain.character_planning import missing_skills
+        from services.character_planning_service import SKILL_ACTIVITY
+
+        act = SKILL_ACTIVITY.get(str(plan.get("activity") or "manufacturing"), "manufacturing")
+        required = getattr(self, "_req_skills", {}).get((int(plan.get("blueprint_type_id") or 0), act), {})
         for char_name in chars:
             remaining = max_lines_for_category(char_name, cat) - int(self._usage.get(char_name or "", {}).get(cat, 0))
-            options.append({"label": f"{char_name}（剩 {max(remaining, 0)} 条）", "value": char_name})
+            gap = missing_skills(required, getattr(self, "_char_skills", {}).get(char_name, {})) if required else {}
+            tag = "，缺技能 " + "、".join(f"{k}{v[0]}" for k, v in gap.items()) if gap else ""
+            options.append({"label": f"{char_name}（剩 {max(remaining, 0)} 条{tag}）", "value": char_name})
             if chosen and char_name == chosen:
                 index = len(options) - 1
         return options, index

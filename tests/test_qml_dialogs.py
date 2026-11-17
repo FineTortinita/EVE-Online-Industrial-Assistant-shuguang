@@ -530,17 +530,22 @@ def char_usage_factory(qapp, monkeypatch):
     `char_config.json` 漂移（`test_query_dashboard` 对同一对数据源也是这么打桩的）。
     """
     import services.char_capacity as cc
+    import services.character_planning_service as cps
     import services.plan_service as ps
 
-    monkeypatch.setattr(
-        ps,
-        "load_plans_for_wizard",
-        lambda: [{"status": "pending", "char_name": "甲", "category": "manufacturing", "parallels": 3}],
-    )
+    plans = [
+        {"id": 1, "product_name": "渡鸦级", "status": "pending", "char_name": "", "category": "manufacturing",
+         "parallels": 3, "runs": 2, "calculated_time": 7200, "group_number": 1, "sub_level": 0},
+        {"id": 2, "product_name": "组件", "status": "pending", "char_name": "甲", "category": "manufacturing",
+         "parallels": 2, "runs": 1, "calculated_time": 3600, "group_number": 1, "sub_level": 1},
+    ]  # fmt: skip
+    chars = {"characters": {"甲": {"skills": {"高级量产技术": 5, "批量生产学": 5}}}}
+    monkeypatch.setattr(ps, "load_plans_for_wizard", lambda: [dict(p) for p in plans])
     monkeypatch.setattr(cc, "get_character_list", lambda: ["甲"])
-    monkeypatch.setattr(
-        cc, "load_all_data", lambda: {"characters": {"甲": {"skills": {"高级量产技术": 5, "批量生产学": 5}}}}
-    )
+    monkeypatch.setattr(cc, "load_all_data", lambda: chars)
+    monkeypatch.setattr(cps, "get_character_list", lambda: ["甲"])
+    monkeypatch.setattr(cps, "load_all_data", lambda: chars)
+    monkeypatch.setattr(cps, "required_skills", lambda ids, db=None: {})
 
     from ui_qml.bridge.char_usage_bridge import CharacterUsageQmlDialog
 
@@ -591,11 +596,16 @@ def test_char_usage_counts_planned_lines(char_usage_factory):
         block = blocks[0]
         assert [line["label"] for line in block["lines"]] == ["制造", "科研", "反应"]
         manufacturing = block["lines"][0]
-        assert manufacturing["active"] == 3, "待生产的 3 条并行线必须算进占用"
+        assert manufacturing["active"] == 2, "待生产（已派给甲）的 2 条并行线必须算进占用；未分配的那条不算甲的"
         assert manufacturing["max"] == 11, "上限由技能算（高级量产技术 + 批量生产学 各 5 级）"
         assert manufacturing["cap"] == 11
         assert block["statusText"] == "生产中"
-        assert dialog.bridge.occupancySummary == "1 人物 · 已规划 3/13"
+        assert dialog.bridge.occupancySummary == "1 人物 · 已规划 2/13"
+        # 人物规划：母项（等子项）派给甲，排在子项完工之后
+        rows = {r["cells"][0]["text"]: r["cells"] for r in dialog.bridge.planRows}
+        assert rows["渡鸦级"][4]["text"] == "甲" and rows["组件"][5]["text"] == "保持指定"
+        bars = dialog.bridge.lanes[0]["bars"]
+        assert [b["start"] for b in bars] == [0.0, 1.0]
     finally:
         dialog.deleteLater()
 
