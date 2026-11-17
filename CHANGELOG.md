@@ -6,6 +6,24 @@
 
 <!-- version list -->
 
+## v0.29.1 (2026-11-17)
+
+### Bug Fixes
+
+- **docs**: API 文档生成转义反引号外的 <，修复 VitePress 构建失败
+  ([`17b2024`](https://github.com/FineTortinita/EVE-Online-Industrial-Assistant-shuguang/commit/17b20246ac0e83ddac23b8687841c2ece255385a))
+
+### Chores
+
+- 停止跟踪 data/market_monitor_settings.json（本机界面状态）
+  ([`2081892`](https://github.com/FineTortinita/EVE-Online-Industrial-Assistant-shuguang/commit/20818920815c55f46226e247d825e4d2dda87fc0))
+
+### Documentation
+
+- 文档站与链接指向曙光版仓库
+  ([`7f718bd`](https://github.com/FineTortinita/EVE-Online-Industrial-Assistant-shuguang/commit/7f718bd9d0bbb54bdc69b710e374d951775b49cb))
+
+
 ## v0.29.0 (2026-11-17)
 
 ### Bug Fixes
