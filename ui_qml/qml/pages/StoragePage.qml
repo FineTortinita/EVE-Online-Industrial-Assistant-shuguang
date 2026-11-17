@@ -784,6 +784,20 @@ Item {
             }
         }
 
+        // 移库（部分数量）：成本按来源单价继承到目标机库
+        FMenu {
+            title: qsTr("移动部分数量到")
+            enabled: itemMenu.state.single === true
+            Repeater {
+                model: itemMenu.state.moveTargets || []
+                FMenuItem {
+                    required property var modelData
+                    text: modelData.name
+                    onTriggered: page.inv.moveItemQuantity(itemMenu.row, modelData.id)
+                }
+            }
+        }
+
         FMenuSeparator {}
         FMenuItem {
             text: qsTr("复制名称")

@@ -448,6 +448,23 @@ class InventoryBridge(QObject):
             move_items(ids, target_id)
             self.refreshItems()
 
+    @Slot(int, int)
+    def moveItemQuantity(self, row: int, target_id: int) -> None:
+        """移库（部分数量）：问数量 → 按来源单价移到目标机库（成本继承，见 `move_quantity`）。"""
+        from PySide6.QtWidgets import QDialog
+
+        from services.inventory_manager import move_quantity
+        from ui_qml.bridge.hangar_dialogs import EditQtyQmlDialog
+
+        item = self._items.item_at(int(row))
+        if not item:
+            return
+        dialog = EditQtyQmlDialog(f"{self._item_name(item)}（移动数量）", item["quantity"], None)
+        if dialog.exec() == QDialog.DialogCode.Accepted and dialog.quantity() > 0:
+            moved = move_quantity(item["id"], int(target_id), dialog.quantity())
+            if moved:
+                self.refreshItems()
+
     @Slot("QVariantList")
     def editItemsCost(self, rows: list) -> None:
         """批量设置成本价：**所选贸易中心**的卖价/买价/均价 × 材料倍率，或手动输入。

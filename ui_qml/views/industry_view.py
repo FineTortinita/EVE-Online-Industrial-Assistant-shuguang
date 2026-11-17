@@ -330,6 +330,30 @@ class IndustryPage(QObject):
         stock = self._material_stock(hids)
         # 子线将产出算一次给所有行共用（逐行重算就是 N 次全库查询）
         from_children = _pending_children_output_by_type(rows)
+        # 备料占用（T2 式预定，阶段 4a）：勾了备料的待生产行按「组号升序 → 子级降序」分库存，
+        # 低组号先拿；未勾备料的行没有预定，回退下面的逐行判定（只看本机库 + 子线将产出）。
+        names: dict[int, str] = {}
+
+        def _item_name(tid: int) -> str:
+            if tid not in names:
+                from core.container import get_container
+                from services.name_resolver import resolve_item_name
+
+                with get_container().db.connect("ref") as c:
+                    names[tid] = resolve_item_name(c, tid)
+            return names[tid]
+
+        alloc: dict = {}
+        try:
+            from core.container import get_container
+            from services.plan_aggregator import compute_reservations
+
+            with get_container().db.connect("user", "ref", "bp", "mkt") as conn:
+                alloc = compute_reservations(conn, rows)["alloc"]
+        except Exception:
+            # 吞的是分配链路的任何异常（缺表 / 评分失败）：退回逐行判定，状态列不丢
+            log.exception("备料占用分配失败，状态列回退逐行判定")
+            alloc = {}
         for r in pending:
             r["material_status"] = None
             r["material_short_tip"] = ""
@@ -342,12 +366,23 @@ class IndustryPage(QObject):
             hid = r.get("mat_hangar_id")
             if not hid:
                 continue
-            try:
-                res = check_materials(r, int(hid), stock=stock.get(int(hid)), all_plans=from_children)
-            except Exception:
-                log.exception("材料判定失败: %s", r.get("id"))
-                continue
-            short = [x for x in res if (x.get("missing") or 0) > 0]
+            mine = alloc.get(int(r.get("id") or 0))
+            if mine is not None:
+                short = [
+                    {"type_id": tid, "name": _item_name(tid), "missing": a.short}
+                    for tid, a in mine.items()
+                    if a.short > 0
+                ]
+                r["reserve_state"] = (
+                    "short" if short else ("coming" if any(a.state == "coming" for a in mine.values()) else "ready")
+                )
+            else:
+                try:
+                    res = check_materials(r, int(hid), stock=stock.get(int(hid)), all_plans=from_children)
+                except Exception:
+                    log.exception("材料判定失败: %s", r.get("id"))
+                    continue
+                short = [x for x in res if (x.get("missing") or 0) > 0]
             if not short:
                 continue
             r["material_status"] = "short"
@@ -355,6 +390,8 @@ class IndustryPage(QObject):
             if len(short) > 8:
                 tip += f"\n… 等 {len(short)} 种"
             # 还在等子项的母项：子线没补齐的那部分也一并说清楚，两种原因都写在 tooltip 里
+            if mine is not None:
+                tip += "\n（按备料占用：组号小的计划先占库存，库存看着够也可能已被别组预定）"
             if waiting:
                 tip = f"{r['material_waiting_tip']}\n子线补不上、仍需采购的部分：\n{tip}"
             r["material_short_tip"] = tip

@@ -551,18 +551,18 @@ def char_usage_factory(qapp, monkeypatch):
 def materials_factory(qapp, monkeypatch):
     import services.industry_dialog_queries as q
 
-    monkeypatch.setattr(
-        q,
-        "get_materials_summary",
-        lambda db: {
-            "materials": {34: {"name": "三钛合金", "total_qty": 1000, "_level": 0, "volume": 0.01}},
-            "inventory": {34: 200},
-            "prices": {34: {"sell": 5.0}},
-        },
-    )
+    monkeypatch.setattr(q, "get_fill_sheet", lambda db: _fill_sheet(need=1000, stock=200))
     from ui_qml.bridge.materials_dialog_bridge import MaterialsSummaryQmlDialog
 
     return MaterialsSummaryQmlDialog
+
+
+def _fill_sheet(*, need: int, stock: int, coming: int = 0) -> list[dict]:
+    short = max(0, need - stock - coming)
+    state = "ready" if stock >= need else ("coming" if short == 0 else "short")
+    row = {"type_id": 34, "name": "三钛合金", "need": need, "stock": min(stock, need), "frozen": 0,
+           "coming": coming, "short": short, "state": state}  # fmt: skip
+    return [{"hangar_id": 1, "hangar_name": "矿仓", "rows": [row]}]
 
 
 def test_output_summary_colours_profit_and_status(output_factory):
@@ -620,22 +620,16 @@ def test_materials_copy_row_and_copy_all(materials_factory):
 
 
 def test_materials_reports_all_ready(materials_factory, monkeypatch):
-    """全部到位时一键复制只给提示，不改剪贴板。"""
+    """全部到位（或子项会补上）时一键复制只给提示，不改剪贴板。"""
     import services.industry_dialog_queries as q
 
-    monkeypatch.setattr(
-        q,
-        "get_materials_summary",
-        lambda db: {
-            "materials": {34: {"name": "三钛合金", "total_qty": 100, "_level": 0, "volume": 0.01}},
-            "inventory": {34: 500},
-            "prices": {34: {"sell": 5.0}},
-        },
-    )
+    # 库存不够但子项会造出来补上（绿）：同样无需采购
+    monkeypatch.setattr(q, "get_fill_sheet", lambda db: _fill_sheet(need=100, stock=40, coming=60))
     from ui_qml.bridge.materials_dialog_bridge import MaterialsSummaryQmlDialog
 
     dialog = MaterialsSummaryQmlDialog()
     try:
+        assert dialog.bridge.rows[0]["cells"][8]["text"] == "子项会补上"
         dialog.bridge.topAction()
         assert "无需采购" in dialog.bridge.error
     finally:

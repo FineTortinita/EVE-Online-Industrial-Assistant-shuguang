@@ -609,3 +609,39 @@ def test_plan_input_blueprint_type_id_resolves_per_activity(db_manager):
         8: 5002,  # 反应：蓝图挂在 activity='reaction' 行上
         9: 4012,  # 6001 同时挂测试蓝图 4011 与真配方 4012 → 必须给真的那张
     }
+
+
+def test_compute_reservations_protects_completed_child_output(temp_db):
+    """阶段 4a：已完成子项已入库的产出（计算口径冻结）只给引用它的母项 —— 低组号的别组不能先占走。
+
+    母项 A（组 2，引用子项 2003）与母项 B（组 1，也要 2003）同一材料机库；库存 2003 = 10，
+    其中 6 个是 A 的子项刚完成入库的。组号顺序本该 B（组 1）先拿，但那 6 个冻结给 A：
+    B 只能拿闲置的 4 个，A 拿到冻结的 6 个。
+    """
+    from services import inventory_manager
+    from services.plan_aggregator import compute_reservations
+
+    with temp_db.connect("bp") as conn:
+        conn.execute("INSERT INTO blueprint_activities VALUES (3901, 'manufacturing', 60)")
+        conn.execute("INSERT INTO blueprint_products VALUES (3901, 'manufacturing', 2901, 1)")
+        conn.execute("INSERT INTO blueprint_materials VALUES (3901, 'manufacturing', 2003, 6, 10)")
+        conn.execute("INSERT INTO blueprint_activities VALUES (3903, 'manufacturing', 60)")
+        conn.execute("INSERT INTO blueprint_products VALUES (3903, 'manufacturing', 2003, 1)")
+    _inventory(temp_db, 5, 2003, 10)
+    rows = [
+        {"id": 1, "product_type_id": 2901, "runs": 1, "parallels": 1, "status": "pending", "materials_ready": 1,
+         "group_number": 2, "sub_level": 0, "mat_hangar_id": 5},
+        {"id": 2, "product_type_id": 2901, "runs": 1, "parallels": 1, "status": "pending", "materials_ready": 1,
+         "group_number": 1, "sub_level": 0, "mat_hangar_id": 5},
+        {"id": 3, "product_type_id": 2003, "runs": 6, "parallels": 1, "status": "completed", "group_number": 2,
+         "sub_level": 1, "source_mother_ids": "1", "deposit_hangar_id": 5},
+    ]  # fmt: skip
+    orig = inventory_manager._default_db
+    inventory_manager._default_db = lambda: temp_db
+    try:
+        with temp_db.connect("user", "ref", "bp", "mkt") as conn:
+            alloc = compute_reservations(conn, rows)["alloc"]
+    finally:
+        inventory_manager._default_db = orig
+    assert alloc[2][2003].taken == {"stock": 4} and alloc[2][2003].short == 2
+    assert alloc[1][2003].taken == {"frozen": 6} and alloc[1][2003].state == "ready"
