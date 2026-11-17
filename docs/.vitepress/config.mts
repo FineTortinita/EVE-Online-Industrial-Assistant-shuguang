@@ -1,16 +1,16 @@
 import { defineConfig } from 'vitepress'
 import { withMermaid } from 'vitepress-plugin-mermaid'
 
-// VitePress 配置 — EVE 工业助手 中文文档站
-// GitHub Pages 站点根路径为 /EVE-Online-Industrial-Assistant/（仓库名），base 必须匹配
+// VitePress 配置 — EVE 商人助手 · 曙光版 中文文档站
+// GitHub Pages 站点根路径为 /EVE-Online-Industrial-Assistant-shuguang/（仓库名），base 必须匹配
 export default withMermaid(
   defineConfig({
     lang: 'zh-CN',
-    title: 'EVE 工业助手',
+    title: 'EVE 商人助手 · 曙光版',
     description:
       'EVE Online 工业制造助手 — 多区域价格查询、制造利润计算、物流规划、贸易评分的开源桌面应用',
 
-    base: '/EVE-Online-Industrial-Assistant/',
+    base: '/EVE-Online-Industrial-Assistant-shuguang/',
 
     head: [
       ['meta', { name: 'theme-color', content: '#61afef' }],
@@ -18,7 +18,7 @@ export default withMermaid(
     ],
 
     themeConfig: {
-      siteTitle: 'EVE 工业助手',
+      siteTitle: 'EVE 商人助手 · 曙光版',
 
       nav: [
         { text: '首页', link: '/' },
@@ -84,14 +84,14 @@ export default withMermaid(
       outline: { level: [2, 3], label: '本页目录' },
 
       editLink: {
-        pattern: 'https://github.com/Hermannmayer/EVE-Online-Industrial-Assistant/edit/main/docs/:path',
+        pattern: 'https://github.com/FineTortinita/EVE-Online-Industrial-Assistant-shuguang/edit/main/docs/:path',
         text: '在 GitHub 上编辑本页',
       },
 
       socialLinks: [
         {
           icon: 'github',
-          link: 'https://github.com/Hermannmayer/EVE-Online-Industrial-Assistant',
+          link: 'https://github.com/FineTortinita/EVE-Online-Industrial-Assistant-shuguang',
         },
       ],
 

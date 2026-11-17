@@ -4,7 +4,7 @@
 
 开源免费，数据全在你自己机器上；现在功能差不多做完了，想找两个愿意试的人提提意见，哪里不好用尽管说。
 
-https://github.com/Hermannmayer/EVE-Online-Industrial-Assistant
+https://github.com/FineTortinita/EVE-Online-Industrial-Assistant-shuguang
 
 ---
 

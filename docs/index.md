@@ -1,7 +1,7 @@
 ---
 layout: home
 hero:
-  name: EVE 工业助手
+  name: EVE 商人助手 · 曙光版
   text: EVE Online 工业制造桌面应用
   tagline: 多区域价格查询 · 制造利润计算 · 物流规划 · 贸易评分，基于 PySide6 的开源工具
   actions:
@@ -13,7 +13,7 @@ hero:
       link: /guide/intro
     - theme: alt
       text: GitHub
-      link: https://github.com/Hermannmayer/EVE-Online-Industrial-Assistant
+      link: https://github.com/FineTortinita/EVE-Online-Industrial-Assistant-shuguang
 features:
   - icon: 🔍
     title: 物品查询

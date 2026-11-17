@@ -22,7 +22,7 @@
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-📖 **在线文档**：[hermannmayer.github.io/EVE-Online-Industrial-Assistant](https://hermannmayer.github.io/EVE-Online-Industrial-Assistant/) — 使用手册 / 安装指南 / 开发文档 / API 参考
+📖 **在线文档**：[finetortinita.github.io/EVE-Online-Industrial-Assistant-shuguang](https://finetortinita.github.io/EVE-Online-Industrial-Assistant-shuguang/) — 使用手册 / 安装指南 / 开发文档 / API 参考
 📝 **更新日志**：[CHANGELOG.md](CHANGELOG.md)
 
 ![主界面总览](docs/public/screenshots/shell.png)
@@ -578,7 +578,7 @@ python build_release.py --skip-zip  # 只出目录，不压缩
 
 ### 文档入口
 
-- **在线文档站**：<https://hermannmayer.github.io/EVE-Online-Industrial-Assistant/>
+- **在线文档站**：<https://finetortinita.github.io/EVE-Online-Industrial-Assistant-shuguang/>
   - 使用手册：`docs/user/`（界面总览、工业制造、库存管理、精炼、BOM 等）
   - 开发文档：`docs/dev/`（架构、数据格式、功能链路、schema 迁移、界面结构规范）
   - API 参考：`docs/api/`（函数级文档，由脚本生成）

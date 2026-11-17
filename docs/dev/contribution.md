@@ -74,4 +74,4 @@ docs: 更新 API 参考文档
 
 ## 许可证
 
-本项目基于 [Apache License 2.0](https://github.com/Hermannmayer/EVE-Online-Industrial-Assistant/blob/main/LICENSE) 开源。提交 PR 即表示同意你的贡献在同协议下发布。
+本项目基于 [Apache License 2.0](https://github.com/FineTortinita/EVE-Online-Industrial-Assistant-shuguang/blob/main/LICENSE) 开源。提交 PR 即表示同意你的贡献在同协议下发布。

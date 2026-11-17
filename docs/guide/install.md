@@ -28,7 +28,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 ## 2. 克隆仓库并安装依赖
 
 ```bash
-git clone https://github.com/Hermannmayer/EVE-Online-Industrial-Assistant.git
+git clone https://github.com/FineTortinita/EVE-Online-Industrial-Assistant-shuguang.git
 cd EVE-Online-Industrial-Assistant
 
 # 安装全部依赖（含开发测试工具）

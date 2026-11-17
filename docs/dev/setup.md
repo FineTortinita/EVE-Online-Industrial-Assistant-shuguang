@@ -15,7 +15,7 @@
 
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/Hermannmayer/EVE-Online-Industrial-Assistant.git
+git clone https://github.com/FineTortinita/EVE-Online-Industrial-Assistant-shuguang.git
 cd EVE-Online-Industrial-Assistant
 
 # 2. 安装 uv（如果还没有）
@@ -99,7 +99,7 @@ git commit -m "feat: 新功能描述"
 
 ## 项目约束
 
-详见 [CLAUDE.md](https://github.com/Hermannmayer/EVE-Online-Industrial-Assistant/blob/main/CLAUDE.md) 中的完整代码规则，关键要点：
+详见 [CLAUDE.md](https://github.com/FineTortinita/EVE-Online-Industrial-Assistant-shuguang/blob/main/CLAUDE.md) 中的完整代码规则，关键要点：
 
 - 所有 SQL 参数化查询
 - 颜色从 `ui_qml.theme.registry` 导入

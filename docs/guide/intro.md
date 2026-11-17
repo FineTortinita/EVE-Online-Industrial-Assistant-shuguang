@@ -45,4 +45,4 @@ EVE Online 工业制造助手是一个基于 **PySide6**（Qt6 for Python）的�
 - **许可证**：Apache License 2.0
 - **来源数据**：ESI（市场价格）+ SDE（物品参考数据）
 
-> ⚠️ 本项目为半成品开发阶段，部分功能仍在完善中。欢迎 [提交 Issue](https://github.com/Hermannmayer/EVE-Online-Industrial-Assistant/issues) 或 Pull Request。
+> ⚠️ 本项目为半成品开发阶段，部分功能仍在完善中。欢迎 [提交 Issue](https://github.com/FineTortinita/EVE-Online-Industrial-Assistant-shuguang/issues) 或 Pull Request。
