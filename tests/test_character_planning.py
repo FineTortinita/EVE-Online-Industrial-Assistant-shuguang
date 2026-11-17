@@ -79,3 +79,12 @@ def test_schedule_waits_for_children_and_slot_capacity():
 )
 def test_parallels_by_time_limit_terminates(runs, hpr, limit, lines, expect):
     assert parallels_by_time_limit(runs, hpr, limit, lines) == expect
+
+
+def test_running_job_keeps_its_slot_before_pending_work():
+    """PR #2 review：单槽人物，在产作业剩 1 小时、待排作业 10 小时 → 在产 0–1，待排 1–11。"""
+    c = Character("甲", {}, {M: 1})
+    jobs = [Job(1, M, 1, 1.0, char="甲", started=True), Job(2, M, 1, 10.0)]
+    slots = {s.job_id: s for s in schedule(jobs, [c], {1: "甲", 2: "甲"})}
+    assert (slots[1].start, slots[1].end) == (0.0, 1.0)
+    assert (slots[2].start, slots[2].end) == (1.0, 11.0)

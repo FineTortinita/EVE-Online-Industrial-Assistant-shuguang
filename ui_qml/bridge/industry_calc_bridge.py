@@ -457,15 +457,26 @@ class IndustryCalcBridge(DialogBridge):
         from services.plan_rebuild import rebuild_children
         from services.plan_service import insert_plans_batch
 
-        hangar = self._hangars[self._mfg_index]["value"] or None
+        mfg_hangar = self._hangars[self._mfg_index]["value"] or None
+        react_hangar = self._hangars[self._react_index]["value"] or None
         hub = self._hubs[self._hub_index]["value"]
         rows = []
         for t in self._result.targets:
+            # 反应成品记成反应计划、放反应设施（PR #2 review：曾一律存成制造计划，重建找不到配方）
+            activity = t.get("activity") or ACTIVITY_MANUFACTURING
+            hangar = react_hangar if activity == ACTIVITY_REACTION else mfg_hangar
             rows.append(
                 {
                     "type_id": t["type_id"],
                     "product_name": t["name"],
-                    "data": {"runs": t["runs"], "parallels": 1, "me": self._me, "te": self._te, "char": ""},
+                    "activity": activity,
+                    "data": {
+                        "runs": t["runs"],
+                        "parallels": 1,
+                        "me": self._me if activity == ACTIVITY_MANUFACTURING else 0,
+                        "te": self._te if activity == ACTIVITY_MANUFACTURING else 0,
+                        "char": "",
+                    },
                     "mat_hub": hub,
                     "sell_hub": hub,
                     "facility": get_hangar_name(hangar) if hangar else "",

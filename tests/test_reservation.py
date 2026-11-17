@@ -58,3 +58,25 @@ def test_summarize_by_hangar():
     agg = summarize(res, {1: 1, 2: 1})[1]
     assert (agg[A].need, agg[A].covered, agg[A].state) == (14, 12, "short")
     assert agg[B].state == "ready"
+
+
+def test_shared_child_output_is_one_pool_across_groups():
+    """PR #2 review：两组共同引用的子项产出只有一份 —— 低组号先拿，另一组看到剩余的缺口。
+
+    组 1、组 2 各要 60，共享子项将产出 100 → 组 1 拿 60，组 2 只拿到 40、缺 20。
+    """
+    res = allocate(
+        [_p(1, 1, hangar=None, t100=60), _p(2, 2, hangar=None, t100=60)], {}, child_running={(1, 2): {A: 100}}
+    )
+    assert res[1][A].taken == {"child_running": 60}
+    assert (res[2][A].covered, res[2][A].short) == (40, 20)
+
+
+def test_own_group_pool_before_shared_pool():
+    """本组独占的子项产出先用，共享池留给别的组。"""
+    res = allocate(
+        [_p(1, 1, hangar=None, t100=10), _p(2, 2, hangar=None, t100=10)],
+        {},
+        child_running={1: {A: 10}, (1, 2): {A: 10}},
+    )
+    assert res[1][A].covered == 10 and res[2][A].covered == 10

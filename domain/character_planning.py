@@ -34,6 +34,7 @@ class Job:
     depends_on: tuple[int, ...] = ()  # 必须先完成的作业（子项）
     char: str = ""  # 已指定人物（空 = 待分配）
     required: Mapping[str, int] = field(default_factory=dict)  # 该活动要求的技能
+    started: bool = False  # 已在游戏里开工：钉在 0 时刻先占槽，待排作业只能排在它之后
 
 
 @dataclass(frozen=True)
@@ -154,8 +155,9 @@ def schedule(
                 ready.append((t, i))
         if not ready:  # 依赖成环：剩下的一律从 0 开
             ready = [(0.0, i) for i in pending]
-        # 先排「能最早开工」的，其次长作业
-        ready.sort(key=lambda x: (x[0], -by_id[x[1]].hours, x[1]))
+        # 已开工的作业先占槽（PR #2 review：否则长的待排作业会被排到在产作业前面），
+        # 其余先排「能最早开工」的，其次长作业
+        ready.sort(key=lambda x: (not by_id[x[1]].started, x[0], -by_id[x[1]].hours, x[1]))
         t0, jid = ready[0]
         job = by_id[jid]
         char = assignment.get(jid, "") or ""
@@ -163,7 +165,8 @@ def schedule(
         start = t0
         if char and key in caps:
             booked = running.setdefault(key, [])
-            start = _earliest_fit(booked, t0, job.hours, job.lines, max(caps[key], job.lines))
+            if not job.started:  # 在产作业已经在跑，不挪
+                start = _earliest_fit(booked, t0, job.hours, job.lines, max(caps[key], job.lines))
             booked.append((start, start + job.hours, job.lines))
         end = start + job.hours
         end_at[jid] = end

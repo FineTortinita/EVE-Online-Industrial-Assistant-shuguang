@@ -1019,15 +1019,19 @@ def compute_reservations(conn, rows: list[dict]) -> dict[str, Any]:
 
     by_id = {int(r["id"]): r for r in rows if r.get("id")}
 
+    def pool_key(groups: set[int]) -> int | tuple[int, ...]:
+        """一份子项产出只进一个池：单组用组号，跨组共享用组号元组（`allocate` 按组号顺序先到先得）。"""
+        return next(iter(groups)) if len(groups) == 1 else tuple(sorted(groups))
+
     def groups_for(child: dict) -> set[int]:
         """子项产出给哪些组：引用它的母项（`source_mother_ids`，跨组共享件也算）所在组；无来源记录按自身组号。"""
         refs = [by_id.get(int(x)) for x in str(child.get("source_mother_ids") or "").split(",") if x.strip().isdigit()]
         gs = {group_of(m) for m in refs if m}
         return gs or {group_of(child)}
 
-    running: dict[int, dict[int, int]] = {}
-    planned: dict[int, dict[int, int]] = {}
-    frozen: dict[int, dict[int, int]] = {}
+    running: dict[int | tuple[int, ...], dict[int, int]] = {}
+    planned: dict[int | tuple[int, ...], dict[int, int]] = {}
+    frozen: dict[int | tuple[int, ...], dict[int, int]] = {}
     #: 冻结 = 已完成子项**已入库**的产出：计算口径（不落库，阶段 4b 才做物理冻结）。
     #: 从共享库存池先扣出来，只给引用它的母项所在组，避免低组号的别组先占走。
     frozen_by_hangar: dict[int, dict[int, int]] = {}
@@ -1051,13 +1055,13 @@ def compute_reservations(conn, rows: list[dict]) -> dict[str, Any]:
                 continue
             fq = frozen_by_hangar.setdefault(int(hangar), {})
             fq[tid] = fq.get(tid, 0) + output_of(r)
-            for g in {group_of(m) for m in active}:
-                frozen.setdefault(g, {})[tid] = frozen.setdefault(g, {}).get(tid, 0) + output_of(r)
+            fz = frozen.setdefault(pool_key({group_of(m) for m in active}), {})
+            fz[tid] = fz.get(tid, 0) + output_of(r)
             continue
         qty = output_of(r)
         if qty > 0:
-            for g in groups_for(r):
-                bucket.setdefault(g, {})[tid] = bucket.setdefault(g, {}).get(tid, 0) + qty
+            pq = bucket.setdefault(pool_key(groups_for(r)), {})
+            pq[tid] = pq.get(tid, 0) + qty
 
     saving_cache: dict[tuple[int, int], float] = {}
     needs: list[PlanNeed] = []

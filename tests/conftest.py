@@ -207,6 +207,15 @@ def pytest_configure(config) -> None:
 
     qInstallMessageHandler(_handler)
 
+    # 工业数据 worker 在**会话级**空转（不随用例撤销）：`IndustryPage.__init__` 排的
+    # `QTimer.singleShot(200, _check_industry_data)` 可能在建页那个用例结束、per-test
+    # monkeypatch 已撤销之后才触发（下一个跑事件循环的用例里），起真线程拉 ESI；页面随后析构
+    # → `QThread: Destroyed while thread '' is still running` → 整个进程 SIGABRT。
+    # 2026-11-17 PR #2 CI 实测：test_qt_noise 建外壳 → test_scoring_service 处 abort。
+    from ui_qml.workers import industry_page_workers
+
+    industry_page_workers.IndustryDataWorker.run = _refuse_network  # type: ignore[method-assign]
+
 
 def _drop_active_entry() -> None:
     entry = _STATE.pop("entry", None)

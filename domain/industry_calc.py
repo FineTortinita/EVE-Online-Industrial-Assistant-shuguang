@@ -220,6 +220,13 @@ def calculate(
         root_recipes.append(r)
         if r is None:
             continue
+        # 成品本身按策略可造时，照中间件登记（`visit`）：别的成品把它当材料时才能找到它的配方，
+        # 结果与成品的先后顺序无关（PR #2 review：[A, B] 且 B 用 A 时，A 曾被当成买入件）。
+        built = is_built(t.type_id)
+        if built is not None and built[0] == r[0]:
+            if state.get(t.type_id) is None:
+                visit(t.type_id)
+            continue
         # 成品在展开自己的子树期间也「在栈上」：子件回指成品的边（环）被切断、按买入，
         # 成品不会反过来变成自己的中间件。
         prev = state.get(t.type_id)

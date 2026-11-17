@@ -116,3 +116,18 @@ def test_scheduler_parallels_and_saving_feed_child_demand():
     )
     assert (res.nodes[2].parallels, res.nodes[2].runs) == (5, 10)
     assert res.raws[3] == 5 * 30  # ceil(round(3×10×0.99, 2)) = 30（29.7）/ 线
+
+
+@pytest.mark.parametrize("order", ["ab", "ba"])
+def test_target_used_by_another_target_is_built_regardless_of_order(order):
+    """PR #2 review：成品 A 又是成品 B 的材料时，A 要按中间件展开，结果与成品先后无关。
+
+    A = 10 原料；B = 2 A。目标 A×1、B×1 → 一共造 3 个 A，买 30 原料，不买 A。
+    """
+    raw, a, b = 1, 10, 20
+    reader = _Reader({a: ("manufacturing", 110, 1, [(raw, 10)]), b: ("manufacturing", 120, 1, [(a, 2)])})
+    ta, tb = Target(a, quantity=1, key="a"), Target(b, quantity=1, key="b")
+    res = calculate(reader, [ta, tb] if order == "ab" else [tb, ta])
+    assert res.raws == {raw: 30}
+    assert a not in res.raws
+    assert res.nodes[a].demand == 2

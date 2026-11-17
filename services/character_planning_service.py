@@ -124,6 +124,7 @@ def build_inputs(plans: list[dict], *, db=None) -> tuple[list[Job], list[Charact
                     max((rem or 0) / 3600, 0.0),
                     (),
                     str(p.get("char_name") or ""),
+                    started=True,
                 )
             )
             rows[int(p["id"])] = p

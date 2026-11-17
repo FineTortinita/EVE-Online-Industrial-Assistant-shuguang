@@ -345,6 +345,7 @@ def run(request: CalcRequest, *, db=None) -> CalcResult:
                 {
                     "type_id": tid,
                     "name": name,
+                    "activity": rr.activity,
                     "quantity": rr.target.quantity,
                     "runs": rr.runs,
                     "sell": price(tid, "sell"),
