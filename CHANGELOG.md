@@ -6,6 +6,60 @@
 
 <!-- version list -->
 
+## v0.29.0 (2026-11-17)
+
+### Bug Fixes
+
+- 修复 BL-048 ~ BL-051（蓝图导入/价格中心/列宽、精炼批量、T2 功能补齐、市场监控篮子）
+  ([`fc2630c`](https://github.com/FineTortinita/EVE-Online-Industrial-Assistant-shuguang/commit/fc2630ca1fa4b7228d7be8175dc3a416df49a902))
+
+- 处理 PR #2 CI 崩溃与评审意见
+  ([`7395683`](https://github.com/FineTortinita/EVE-Online-Industrial-Assistant-shuguang/commit/73956832b799cf9b311f13627dca0c7d620b36c7))
+
+- **ci**: 修复 mypy 报错（列宽测试、合同页中心名、sso_live_check）
+  ([`f439400`](https://github.com/FineTortinita/EVE-Online-Industrial-Assistant-shuguang/commit/f439400cd867966b5614d64cfda7800f29991dfc))
+
+- **ci**: 全物品桥默认区域与查询页对齐，建桥时不再起取数线程
+  ([`7662903`](https://github.com/FineTortinita/EVE-Online-Industrial-Assistant-shuguang/commit/766290340464d33d6579fb442925018a1b0df556))
+
+- **工业**: 计算口径对齐游戏机制（重构阶段 1，BL-052）
+  ([`771892a`](https://github.com/FineTortinita/EVE-Online-Industrial-Assistant-shuguang/commit/771892ade2fc17fe85059c574e0c268fa083863f))
+
+### Chores
+
+- 添加中文 Issue 模板与自动标签工作流
+  ([`00c3762`](https://github.com/FineTortinita/EVE-Online-Industrial-Assistant-shuguang/commit/00c3762a554c844a87b8d3f406bc800158cbe1ca))
+
+### Continuous Integration
+
+- **曙光**: Resolve release tag 步骤补 PYTHONUTF8，修 release_notes 打印中文崩溃
+  ([`c7313d2`](https://github.com/FineTortinita/EVE-Online-Industrial-Assistant-shuguang/commit/c7313d26963c9b6d92893d8727f54cbffc4cb4fe))
+
+### Documentation
+
+- **曙光**: README 下载说明不写死包名；release 已带 zip 即视为已打包（资产已改 ASCII 名）
+  ([`6ff6603`](https://github.com/FineTortinita/EVE-Online-Industrial-Assistant-shuguang/commit/6ff66036d001aba78584f89783a8cfdb188d6433))
+
+### Features
+
+- **ESI**: 资产同步与工业作业对账（重构阶段 6）
+  ([`55ebe9d`](https://github.com/FineTortinita/EVE-Online-Industrial-Assistant-shuguang/commit/55ebe9d7faf29cfcd875071df8a79d9ea7d00cec))
+
+- **人物规划**: 技能门槛、自动派人与按槽位排程（重构阶段 5）
+  ([`e99e22d`](https://github.com/FineTortinita/EVE-Online-Industrial-Assistant-shuguang/commit/e99e22da6396af0d65187753504d228d3ca74fc4))
+
+- **工业**: 开明网式「制造计算」窗口（重构阶段 3）
+  ([`bfbe299`](https://github.com/FineTortinita/EVE-Online-Industrial-Assistant-shuguang/commit/bfbe299af77a10e160fb3e7e68dae7e249da8dd4))
+
+- **库存**: T2 式备料占用与填料总表三态（重构阶段 4a，无迁移）
+  ([`823925b`](https://github.com/FineTortinita/EVE-Online-Industrial-Assistant-shuguang/commit/823925bef6af9ff333f3ef7abf9c5a7ef7499181))
+
+### Refactoring
+
+- **工业**: 统一工业计算引擎 domain/industry_calc.py（重构阶段 2）
+  ([`4f2df6d`](https://github.com/FineTortinita/EVE-Online-Industrial-Assistant-shuguang/commit/4f2df6d39ce8413850dff22a8fd994bbbed3f589))
+
+
 ## v0.28.0 (2026-11-16)
 
 ### Bug Fixes
