@@ -684,6 +684,18 @@ Window {
                      * 不对」：那份状态是**跨行共享的单例**，用户在底部选了人之后，
                      * 行内点启动到底用谁要看「上一次选中过哪一行」，语义混乱。 */
 
+                    // 重构阶段 6：ESI 进行中作业 ↔ 在产计划对账（游戏内已完成 → 待下线；报出没对上计划的作业）
+                    FButton {
+                        objectName: "esiJobsButton"
+                        text: qsTr("ESI 对账作业")
+                        onClicked: win.launcher.reconcileEsiJobs()
+                        ToolTip.visible: esiJobsHover.hovered
+                        ToolTip.text: qsTr("拉取全部已绑定角色的进行中工业作业，与「生产中」的计划对账：游戏内已完成的标为待下线，没对上计划的逐条提示")
+                        HoverHandler {
+                            id: esiJobsHover
+                        }
+                    }
+
                     Item {
                         Layout.fillWidth: true
                     }

@@ -257,6 +257,11 @@ class LauncherBridge(QObject):
     def mainAction(self) -> None:
         self._defer(lambda: self._page.main_action())
 
+    @Slot()
+    def reconcileEsiJobs(self) -> None:
+        """从 ESI 对账进行中工业作业（重构阶段 6）。"""
+        self._defer(lambda: self._page.reconcile_esi_jobs())
+
     # ── 刷新通知（由页面在数据变化后调用） ──────────────────────
 
     def notify_toolbar(self) -> None:

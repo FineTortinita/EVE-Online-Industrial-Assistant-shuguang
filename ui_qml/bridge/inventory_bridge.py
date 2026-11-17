@@ -385,6 +385,99 @@ class InventoryBridge(QObject):
         self.refreshItems()
 
     @Slot()
+    def syncAssetsFromEsi(self) -> None:
+        """从 ESI 同步资产（重构阶段 6）：拉全部已绑定角色的资产 → 选一个游戏位置 → 对当前机库做「库存修正」审阅。
+
+        落库仍走剪贴板导入那套「导入预览 → 确认 → 写入」（全量同步、双向比对、可逐行取消），不静默改库存；
+        成本列按当前贸易中心卖价预填（与剪贴板导入相同），已有物品的加权成本不被覆盖为 0。
+        """
+        if self._current_hangar_id is None:
+            return
+        from PySide6.QtCore import QEventLoop
+
+        from ui_qml.bridge.message_dialog import FMessageDialog
+        from ui_qml.workers.esi_industry_worker import EsiIndustrySyncWorker
+
+        result: dict = {}
+        loop = QEventLoop()
+        worker = EsiIndustrySyncWorker(parent=self)
+        worker.result_signal.connect(lambda payload: result.update(payload=payload))
+
+        def _finished(ok: bool, msg: str) -> None:
+            result.update(ok=ok, msg=msg)
+            loop.quit()
+
+        worker.finished_signal.connect(_finished)
+        self._esi_worker = worker  # 保活
+        worker.start()
+        loop.exec()
+        if not result.get("ok"):
+            FMessageDialog.warning(None, "ESI 同步失败", result.get("msg") or "未知错误")
+            return
+        payload = result.get("payload") or {}
+        self._run_esi_asset_review(payload)
+
+    def _run_esi_asset_review(self, payload: dict) -> None:
+        from PySide6.QtWidgets import QDialog
+
+        from services.esi_sync_service import location_choices, review_items
+        from ui_qml.bridge.input_dialog import MODE_CHOICE, InputBridge, InputQmlDialog
+        from ui_qml.bridge.message_dialog import FMessageDialog
+        from ui_qml.bridge.review_bridge import ImportReviewQmlDialog
+        from ui_qml.workers.inventory_import_worker import snapshot_hangar
+
+        locs = location_choices(payload)
+        errors = payload.get("errors") or []
+        if not locs:
+            FMessageDialog.information(
+                None, "ESI 同步", "没有拉到可用的资产" + ("：" + "；".join(errors) if errors else "")
+            )
+            return
+        labels = [f"{x['name']}（{x['types']} 种 / {x['units']:,} 件）" for x in locs]
+        bridge = InputBridge(
+            "从 ESI 同步资产",
+            f"选择要对账到「{self._current_hangar_label()}」的游戏位置："
+            + (" ⚠ " + "；".join(errors) if errors else ""),
+            MODE_CHOICE,
+            choices=labels,
+        )
+        dlg = InputQmlDialog(bridge, None, size=(560, 240))
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        picked = bridge.text_value()
+        chosen = locs[labels.index(picked)] if picked in labels else locs[0]
+        items = review_items(chosen["items"])
+        if self._current_hangar_id is None:
+            return
+        hangar_id = int(self._current_hangar_id)
+        before, names = snapshot_hangar(hangar_id)
+        review = ImportReviewQmlDialog(items, self._current_hangar_label(), hangar_id, None, default_mode="full")
+        if review.exec() != QDialog.DialogCode.Accepted:
+            return
+        mode = review.mode()
+        clear_missing = review.get_clear_missing() if mode == "full" else {}
+        data = review.get_import_data()
+        if not data and not clear_missing:
+            return
+        if clear_missing and not FMessageDialog.question(
+            None, "全量同步 — 清零确认", review.clear_missing_text(), default_yes=False
+        ):
+            return
+        targets = review.get_sync_targets() if mode == "full" else None
+        # 落库与剪贴板导入同一条后台路径（单事务、导入后算差异），主线程只等结果
+        from ui_qml.bridge.review_bridge import ImportChangeQmlDialog, _wait_worker
+        from ui_qml.workers.inventory_import_worker import InventoryImportApplyWorker
+
+        res = _wait_worker(
+            InventoryImportApplyWorker(hangar_id, data, mode, targets, clear_missing or None, before, names, None),
+            None,
+            "写入库存",
+        )
+        if res is not None:
+            ImportChangeQmlDialog(res["changes"], res["added"], res["moved"], self._current_hangar_label(), None).exec()
+        self.refreshItems()
+
+    @Slot()
     def importPurchasesFromClipboard(self) -> None:
         """从钱包交易记录粘贴购买记录（「钱包 → 交易记录」的负 ISK 行）→ 选机库 → 按单价入库。
 

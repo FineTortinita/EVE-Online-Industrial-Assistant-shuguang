@@ -6,6 +6,13 @@
 
 用法（仓库根）：
     .venv/Scripts/python.exe -m scripts.sso_live_check
+    .venv/Scripts/python.exe -m scripts.sso_live_check --industry   # 额外申请资产 / 蓝图 / 工业作业 scope 并逐个调接口
+    .venv/Scripts/python.exe -m scripts.sso_live_check --industry=assets,jobs   # 只申请其中几个（assets / blueprints / jobs）
+
+`--industry` 用来验证网易公共客户端是否放行这几个 scope（重构阶段 6 的前置，2026-11-17 加）：
+授权页对任意 scope 都先 302 到登录页，**放不放行只有登录后才知道** —— 不放行时授权页报
+`invalid_scope`（第 2 步拿不到回跳地址），放行时第 6 步逐个接口打一次、只打印 HTTP 状态与条数。
+2026-11-17 用户实测：`esi-characters.read_blueprints.v1` → `invalid_scope`（公共客户端不放行）。
 """
 
 from __future__ import annotations
@@ -13,11 +20,40 @@ from __future__ import annotations
 import asyncio
 import json
 import secrets
+import sys
 import webbrowser
 
 import aiohttp
 
 from ui_qml.workers import esi_skill_worker as esw
+
+#: `--industry` 额外申请的 scope → 用它验证的接口（{id} = 角色 id）
+_INDUSTRY_PROBES = {
+    "esi-assets.read_assets.v1": "/characters/{id}/assets/",
+    "esi-characters.read_blueprints.v1": "/characters/{id}/blueprints/",
+    "esi-industry.read_character_jobs.v1": "/characters/{id}/industry/jobs/",
+}
+#: `--industry=` 的短名
+_PROBE_KEYS = {
+    "assets": "esi-assets.read_assets.v1",
+    "blueprints": "esi-characters.read_blueprints.v1",
+    "jobs": "esi-industry.read_character_jobs.v1",
+}
+
+
+def _selected_probes(argv: list[str]) -> dict[str, str]:
+    """命令行 → 要探测的 {scope: 接口}；`--industry` = 全部，`--industry=a,b` = 只要这几个，没有 = 不探测。"""
+    for arg in argv:
+        if arg == "--industry":
+            return dict(_INDUSTRY_PROBES)
+        if arg.startswith("--industry="):
+            keys = [k.strip() for k in arg.split("=", 1)[1].split(",") if k.strip()]
+            unknown = [k for k in keys if k not in _PROBE_KEYS]
+            if unknown:
+                raise SystemExit(f"未知探测项 {unknown}，可选：{', '.join(_PROBE_KEYS)}")
+            return {_PROBE_KEYS[k]: _INDUSTRY_PROBES[_PROBE_KEYS[k]] for k in keys}
+    return {}
+
 
 #: 只打印这些 claim 的值；其余只列键名（sub/name 用于确认角色身份格式，不含令牌本体）
 _SAFE_CLAIMS = ("iss", "aud", "azp", "sub", "name", "scp", "exp", "tenant", "region", "kid")
@@ -38,13 +74,17 @@ async def _post(session: aiohttp.ClientSession, data: dict) -> tuple[int, dict]:
 
 
 async def main() -> int:
+    probes = _selected_probes(sys.argv[1:])
+    extra = tuple(probes)
     verifier, challenge = esw._pkce_pair()
     state = secrets.token_urlsafe(16)
 
     async with aiohttp.ClientSession(headers={"Accept": "application/json"}) as session:
         device_id = await esw._fetch_device_id(session)
         print(f"0) 网易设备 ID 申请成功（{len(device_id)} 字符）")
-        url = esw._authorize_url(challenge, state, device_id=device_id)
+        url = esw._authorize_url(challenge, state, extra, device_id=device_id)
+        if extra:
+            print("   额外申请 scope：", " ".join(extra))
         print("1) 浏览器将打开网易授权页（也可手动复制下面的地址）：\n   " + url)
         webbrowser.open(url)
         pasted = input("2) 登录并选好角色后，把空白页地址栏的完整网址粘贴到这里，回车：\n> ")
@@ -82,7 +122,21 @@ async def main() -> int:
             body = await resp.json(content_type=None)
             n = len(body.get("skills", [])) if isinstance(body, dict) else 0
             print(f"5) 技能接口：HTTP {resp.status}，技能条数 {n}，总技能点 {body.get('total_sp') if n else body}")
-            return 0 if resp.status == 200 else 1
+            ok = resp.status == 200
+
+        for scope, path in probes.items():
+            granted = scope in (claims.get("scp") or [])
+            async with session.get(
+                esw.esi_url(path.format(id=char_id)), headers={"Authorization": f"Bearer {access}"}
+            ) as resp:
+                body = await resp.json(content_type=None)
+                n = len(body) if isinstance(body, list) else "—"
+                pages = resp.headers.get("X-Pages", "1")
+                print(
+                    f"6) {scope}（令牌里{'有' if granted else '没有'}）→ {path}: HTTP {resp.status}，条数 {n}，页数 {pages}"
+                )
+                ok = ok and resp.status == 200
+        return 0 if ok else 1
 
 
 if __name__ == "__main__":

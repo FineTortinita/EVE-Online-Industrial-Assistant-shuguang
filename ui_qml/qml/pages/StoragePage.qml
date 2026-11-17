@@ -243,6 +243,18 @@ Item {
                         ToolTip.text: qsTr("在游戏「钱包 → 交易记录」里 Ctrl+A/C 复制后点这里：把负 ISK 的买入行按单价（成本）入到指定机库")
                     }
                     FButton {
+                        objectName: "esiAssetSyncButton"
+                        text: qsTr("从 ESI 同步资产")
+                        onClicked: if (page.inv)
+                            page.inv.syncAssetsFromEsi()
+
+                        HoverHandler {
+                            id: esiAssetHover
+                        }
+                        ToolTip.visible: esiAssetHover.hovered
+                        ToolTip.text: qsTr("拉取全部已绑定角色的资产，选一个游戏位置，按「库存修正」对账到当前机库（先预览再写入）。蓝图不在内（曙光 ESI 不开放蓝图权限）")
+                    }
+                    FButton {
                         text: qsTr("查看规划缺失材料")
                         onClicked: if (page.inv)
                             page.inv.openMaterialCoverage()

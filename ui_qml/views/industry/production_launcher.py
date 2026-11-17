@@ -1184,6 +1184,52 @@ class ProductionLauncher(QObject):
 
     # ── 选中 / 底部 ──────────────────────────────────────
 
+    # ── ESI 作业对账（重构阶段 6）──────────────────────────────
+
+    def reconcile_esi_jobs(self) -> None:
+        """从 ESI 拉全部已绑定角色的进行中工业作业 → 与在产计划对账。
+
+        ESI 说某计划的全部线都已完成（ready / delivered）→ 置为「待下线」；游戏里有、本地没有对应计划的
+        作业逐条报出来（多半是忘了点「EVE 中已启动」，或在游戏里多开了线）。不改流程数 / 人物，只改状态。
+        """
+        from ui_qml.workers.esi_industry_worker import EsiIndustrySyncWorker
+
+        if getattr(self, "_esi_job_worker", None) is not None:
+            return
+        worker = EsiIndustrySyncWorker(parent=self)
+        self._esi_job_worker: EsiIndustrySyncWorker | None = worker
+        worker.result_signal.connect(self._on_esi_jobs)
+        worker.finished_signal.connect(self._on_esi_jobs_finished)
+        self._show_feedback("正在从 ESI 拉取工业作业…")
+        worker.start()
+
+    def _on_esi_jobs(self, payload: dict) -> None:
+        from services.esi_sync_service import mark_ready, reconcile_jobs
+
+        try:
+            res = reconcile_jobs(payload)
+        except Exception:
+            # 吞的是对账取数异常（user.db 读失败）：只在反馈栏报错，不动任何计划
+            log.exception("ESI 作业对账失败")
+            self._show_feedback("ESI 作业对账失败，详见日志")
+            return
+        n_ready = mark_ready(res["ready_ids"])
+        matched = sum(1 for m in res["matches"] if m.plan_id is not None)
+        parts = [f"ESI 进行中作业 {len(res['matches'])} 条，已对上计划 {matched} 条"]
+        if n_ready:
+            parts.append(f"{n_ready} 条计划游戏内已完成 → 待下线")
+        if res["unmatched"]:
+            parts.append(f"{len(res['unmatched'])} 条游戏作业没有对应计划（忘了点「EVE 中已启动」？）")
+        if payload.get("errors"):
+            parts.append("；".join(payload["errors"]))
+        self._show_feedback("；".join(parts))
+        self._on_poll()
+
+    def _on_esi_jobs_finished(self, ok: bool, msg: str) -> None:
+        self._esi_job_worker = None
+        if not ok:
+            self._show_feedback(f"ESI 作业对账失败：{msg}")
+
     def _show_feedback(self, text: str) -> None:
         """反馈按需显示 —— 无内容时不占位。"""
         self._feedback_text = text or ""
