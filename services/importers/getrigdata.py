@@ -1,9 +1,10 @@
 """拉取结构改装件（Standup Engineering Rigs）的制造加成（从 ESI /universe/types/ 并发拉取）
 
 只处理制造相关的工程站改装件组（reference.db item 表 group 1816-1870，剔除
-1818 Strong Boxes 与 1817 空组，共 53 组 111 个改件）：
-  - 材料效率钻机（attributeEngRigMatBonus=2594）
-  - 时间效率钻机（attributeEngRigTimeBonus=2593）
+1818 Strong Boxes 与 1817 空组，共 53 组 111 个改件），以及精炼建筑的反应改装件
+（group 1933-1939，2026-11-17 补，BL-052-3）：
+  - 材料效率钻机（attributeEngRigMatBonus=2594；反应改件 RefRigMatBonus=2714）
+  - 时间效率钻机（attributeEngRigTimeBonus=2593；反应改件 RefRigTimeBonus=2713）
   - 成本优化钻机（attributeEngRigCostBonus=2595；发明/ME/TE 研究/拷贝成本）
 
 说明：SDE 的 typeIDs.yaml 导出不含 dogmaAttributes，改件加成直接走 ESI 拉取，
@@ -35,6 +36,11 @@ TIME_BONUS_ATTR = 2593  # attributeEngRigTimeBonus（百分比，-20 = -20%）
 #: display_name="Cost Reduction Bonus", unit 105=百分比；成本优化改件 I=-10 / II=-12，
 #: 制造类改件该属性为 0）。实测取值见 audit 01-13。
 COST_BONUS_ATTR = 2595
+#: 精炼建筑反应改装件（组 1933-1939）的加成挂在另一对属性上：RefRigMatBonus=2714 /
+#: RefRigTimeBonus=2713（曙光 ESI 2026-11-17 实测：M-Set 材料 I = -2.0，L-Set II = -2.4 / -24）。
+#: 一个改件只会带其中一套，取非零的那个写进同一列 mat_bonus / time_bonus。
+REF_MAT_BONUS_ATTR = 2714
+REF_TIME_BONUS_ATTR = 2713
 
 # 制造相关的结构改装件组（1816-1870 剔除 1818 Strong Boxes / 1817 空组）
 RIG_GROUP_IDS = [
@@ -91,6 +97,14 @@ RIG_GROUP_IDS = [
     1868,
     1869,
     1870,
+    # 反应改装件（精炼建筑：复合 / 混合 / 生化 M-Set 时间与材料，L-Set 反应效率）
+    1933,
+    1934,
+    1935,
+    1936,
+    1937,
+    1938,
+    1939,
 ]
 
 
@@ -152,8 +166,8 @@ async def fetch_rig_bonuses(client, type_id: int) -> dict | None:
     attrs = {a["attribute_id"]: a["value"] for a in (data.get("dogma_attributes") or [])}
     return {
         "type_id": type_id,
-        "mat_bonus": float(attrs.get(MAT_BONUS_ATTR, 0) or 0),
-        "time_bonus": float(attrs.get(TIME_BONUS_ATTR, 0) or 0),
+        "mat_bonus": float(attrs.get(MAT_BONUS_ATTR, 0) or attrs.get(REF_MAT_BONUS_ATTR, 0) or 0),
+        "time_bonus": float(attrs.get(TIME_BONUS_ATTR, 0) or attrs.get(REF_TIME_BONUS_ATTR, 0) or 0),
         "cost_bonus": float(attrs.get(COST_BONUS_ATTR, 0) or 0),
     }
 

@@ -16,6 +16,7 @@ import json
 
 from core.container import get_container
 from core.logger import log
+from domain.formulas import RIG_SECURITY_MULT_MANUFACTURING, rig_bonus_multiplier, security_band
 from domain.rigs import rig_category_applies, rig_category_for_product
 from services.database_manager import DatabaseManager
 from services.terminology import term
@@ -33,6 +34,11 @@ STRUCTURE_BASE: dict[str, dict] = {
     "raitaru": {"mat": 0.99, "cost": 0.97, "time": 0.85, "rig_size": "M"},
     "azbel": {"mat": 0.99, "cost": 0.96, "time": 0.80, "rig_size": "L"},
     "sotiyo": {"mat": 0.99, "cost": 0.95, "time": 0.70, "rig_size": "XL"},
+    # 精炼建筑（反应）：本体无材料 / 成本加成；塔塔拉反应时间 ×0.75（SDE 2721
+    # strReactionTimeMultiplier，曙光 ESI 2026-11-17 实测；阿塔诺无该属性 = 1.0）。
+    # 精炼建筑**不能做制造**，这里的倍率只对 activity='reaction' 生效（见 `_structure_base`）。
+    "athanor": {"mat": 1.0, "cost": 1.0, "time": 1.0, "rig_size": "M", "reaction_only": True},
+    "tatara": {"mat": 1.0, "cost": 1.0, "time": 0.75, "rig_size": "L", "reaction_only": True},
 }
 
 FACILITY_TYPE_LABELS: dict[str, str] = {
@@ -40,6 +46,8 @@ FACILITY_TYPE_LABELS: dict[str, str] = {
     "raitaru": "莱塔卢 (Raitaru, 中)",
     "azbel": "阿兹贝尔 (Azbel, 大)",
     "sotiyo": "索迪约 (Sotiyo, 超大)",
+    "athanor": "阿塔诺 (Athanor, 中·反应)",
+    "tatara": "塔塔拉 (Tatara, 大·反应)",
 }
 
 # 结构改装件组 → (尺寸, 制造类别 key, 效果)。effect ∈ mat|time|both|cost。
@@ -101,7 +109,31 @@ RIG_GROUP_MAP: dict[int, tuple[str, str, str]] = {
     1868: ("XL", "ship", "both"),
     1869: ("XL", "structure_component", "both"),
     1870: ("XL", "laboratory", "both"),
+    # ── 反应改装件（精炼建筑；SDE 2713/2714 RefRig*Bonus，安等系数 高/低 1.0、00 1.1）──
+    1933: ("M", "reaction_composite", "time"),
+    1934: ("M", "reaction_composite", "mat"),
+    1935: ("M", "reaction_hybrid", "time"),
+    1936: ("M", "reaction_hybrid", "mat"),
+    1937: ("M", "reaction_biochemical", "time"),
+    1938: ("M", "reaction_biochemical", "mat"),
+    1939: ("L", "reaction", "both"),
 }
+
+#: 反应改装件类别（只作用于 activity='reaction'；制造 / 科研作业一律不吃）。
+_REACTION_RIG_CATEGORIES = frozenset({"reaction", "reaction_composite", "reaction_hybrid", "reaction_biochemical"})
+
+#: 反应配方组（蓝图 item.group_id）→ 反应改装件类别。曙光 reference.db 实测四个组；
+#: 1888 复合（含中间材料 / 未精炼矿物 / 复合材料）、4097 分子锻造按 CCP 描述同属复合反应改件，
+#: 1889 聚合物 = 混合（T3），1890 = 生化。
+REACTION_FORMULA_GROUP_CATEGORY: dict[int, str] = {
+    1888: "reaction_composite",
+    4097: "reaction_composite",
+    1889: "reaction_hybrid",
+    1890: "reaction_biochemical",
+}
+
+#: 反应改装件安等系数（SDE 2355/2356/2357 实测：1.0 / 1.0 / 1.1）
+RIG_SECURITY_MULT_REACTION: dict[str, float] = {"high": 1.0, "low": 1.0, "null": 1.1}
 
 RIG_CATEGORY_LABELS: dict[str, str] = {
     "equipment": "装备制造",
@@ -125,6 +157,10 @@ RIG_CATEGORY_LABELS: dict[str, str] = {
     "te_research": "生产效率研究",
     "bp_copy": "蓝图复制",
     "laboratory": "实验室(科研, XL)",
+    "reaction": "反应(L)",
+    "reaction_composite": "复合反应",
+    "reaction_hybrid": "混合反应",
+    "reaction_biochemical": "生化反应",
 }
 
 
@@ -161,7 +197,10 @@ def get_rig_catalog(facility_type: str | None, *, _db: DatabaseManager | None = 
     if not base or not base["rig_size"]:
         return []
     size = base["rig_size"]
-    group_ids = [g for g, (s, _, _) in RIG_GROUP_MAP.items() if s == size]
+    refinery = bool(base.get("reaction_only"))
+    group_ids = [
+        g for g, (s, cat, _) in RIG_GROUP_MAP.items() if s == size and (cat in _REACTION_RIG_CATEGORIES) == refinery
+    ]
     conn_mgr = _db or _default_db()
     placeholders = ",".join("?" * len(group_ids))
     try:
@@ -254,6 +293,12 @@ def _rig_matches_activity(
     _size, cat, _effect = RIG_GROUP_MAP.get(int(rig_group), ("", "", "mat"))
     if not cat:
         return False
+    if activity == "reaction" or cat in _REACTION_RIG_CATEGORIES:
+        # 反应改装件只作用于反应；反应作业只吃反应改装件。L 组 1939 覆盖三类反应，
+        # M 组按反应配方类别匹配（给不出类别时不筛 —— 与制造侧「推导不到退回旧行为」同口径）。
+        if activity != "reaction" or cat not in _REACTION_RIG_CATEGORIES:
+            return False
+        return cat == "reaction" or blueprint_category is None or cat == blueprint_category
     science_cat = _SCIENCE_RIG_CATEGORY.get(activity)
     if science_cat is not None:
         # XL-Set Laboratory Optimization（组 1870，类别 laboratory）按 ESI 描述同时覆盖
@@ -315,14 +360,25 @@ def _load_rig_bonuses(
     return bonus, groups
 
 
+def _rig_security_mult(rig_group: int | None, band: str) -> float:
+    """该改装件在本安等档位下的放大系数（制造 / 科研 1.0·1.9·2.1；反应 1.0·1.0·1.1）。"""
+    _size, cat, _effect = RIG_GROUP_MAP.get(int(rig_group or 0), ("", "", ""))
+    table = RIG_SECURITY_MULT_REACTION if cat in _REACTION_RIG_CATEGORIES else RIG_SECURITY_MULT_MANUFACTURING
+    return table[band]
+
+
 def resolve_rig_multipliers(
     rig_ids: list[int],
     *,
     activity: str | None = None,
     blueprint_category: str | None = None,
+    security: float | None = None,
     _db: DatabaseManager | None = None,
 ) -> tuple[float, float]:
-    """(材料倍率, 时间倍率) 乘算叠加：Π(1 + bonus/100)。structure_rigs 缺行按加成 0。
+    """(材料倍率, 时间倍率) 乘算叠加：Π(1 + bonus × 安等系数 / 100)。structure_rigs 缺行按加成 0。
+
+    ``security`` 是设施所在星系的安等（None = 未设星系 → 按高安 1.0，与旧行为一致）；
+    低安 / 00 的改装件加成按 SDE 系数放大（BL-052-2）。
 
     传入 ``activity`` 时只叠加**匹配该活动/蓝图类别**的改件（RIG_GROUP_MAP 的
     category_key）；不传则保持旧行为（全部改件都算，供机库设置页展示用）。
@@ -337,14 +393,16 @@ def resolve_rig_multipliers(
     if loaded is None:
         return mat_mult, time_mult
     bonus, groups = loaded
+    band = security_band(security)
     for rid in rig_ids:
         mb, tb, _cb = bonus.get(int(rid), (0.0, 0.0, 0.0))
         if groups is not None and not _rig_matches_activity(
             groups.get(int(rid), 0), activity=activity, blueprint_category=blueprint_category
         ):
             continue
-        mat_mult *= 1.0 + mb / 100.0
-        time_mult *= 1.0 + tb / 100.0
+        sec = _rig_security_mult(groups.get(int(rid)) if groups else None, band)
+        mat_mult *= rig_bonus_multiplier(mb, sec)
+        time_mult *= rig_bonus_multiplier(tb, sec)
     return round(mat_mult, 6), round(time_mult, 6)
 
 
@@ -353,9 +411,10 @@ def resolve_rig_cost_multiplier(
     *,
     activity: str | None = None,
     blueprint_category: str | None = None,
+    security: float | None = None,
     _db: DatabaseManager | None = None,
 ) -> float:
-    """成本倍率 Π(1 + cost_bonus/100)；无数据 → 1.0（零漂移）。
+    """成本倍率 Π(1 + cost_bonus × 安等系数 / 100)；无数据 → 1.0（零漂移）。
 
     成本优化改件（ESI attributeEngRigCostBonus=2595）只作用于发明/ME/TE/拷贝，
     由 `RIG_GROUP_MAP` 的 category_key 与活动匹配；结构类改件该属性为 0，乘 1.0。
@@ -367,6 +426,7 @@ def resolve_rig_cost_multiplier(
     if loaded is None:
         return 1.0
     bonus, groups = loaded
+    band = security_band(security)
     cost_mult = 1.0
     for rid in rig_ids:
         _mb, _tb, cb = bonus.get(int(rid), (0.0, 0.0, 0.0))
@@ -374,7 +434,7 @@ def resolve_rig_cost_multiplier(
             groups.get(int(rid), 0), activity=activity, blueprint_category=blueprint_category
         ):
             continue
-        cost_mult *= 1.0 + cb / 100.0
+        cost_mult *= rig_bonus_multiplier(cb, _rig_security_mult(groups.get(int(rid)) if groups else None, band))
     return round(cost_mult, 6)
 
 
@@ -401,6 +461,57 @@ def _blueprint_rig_category(product_type_id: int | None, *, _db: DatabaseManager
     return rig_category_for_product(category_id=row[0], group_id=row[1])
 
 
+def _reaction_rig_category(product_type_id: int | None, *, _db: DatabaseManager | None) -> str | None:
+    """反应产物 → 反应改装件类别（按其反应配方的 item.group_id，见 `REACTION_FORMULA_GROUP_CATEGORY`）。"""
+    if not product_type_id:
+        return None
+    conn_mgr = _db or _default_db()
+    try:
+        with conn_mgr.connect("ref", "bp") as conn:
+            row = conn.execute(
+                "SELECT i.group_id FROM blueprint_products p JOIN item i ON i.type_id = p.blueprint_type_id "
+                "WHERE p.product_type_id = ? AND p.activity = 'reaction' ORDER BY p.blueprint_type_id LIMIT 1",
+                (int(product_type_id),),
+            ).fetchone()
+    except Exception:
+        # 吞的是 sqlite3.OperationalError：测试库缺 blueprint_products / item → 不按类别筛
+        log.debug("反应配方类别查询失败，跳过反应改件类别筛选", exc_info=True)
+        return None
+    return REACTION_FORMULA_GROUP_CATEGORY.get(int(row[0])) if row else None
+
+
+def _system_security(solar_system_id: int | None, *, _db: DatabaseManager | None) -> float | None:
+    """星系安等（reference.db `solar_system.security`）；未设星系 / 查不到 → None（按高安）。"""
+    if not solar_system_id:
+        return None
+    conn_mgr = _db or _default_db()
+    try:
+        with conn_mgr.connect("ref") as conn:
+            row = conn.execute(
+                "SELECT security FROM solar_system WHERE solar_system_id = ?", (int(solar_system_id),)
+            ).fetchone()
+    except Exception:
+        # 吞的是 sqlite3.OperationalError：测试库缺 solar_system 表 → 按高安（系数 1.0，旧行为）
+        log.debug("星系安等查询失败，改装件按高安系数", exc_info=True)
+        return None
+    return float(row[0]) if row and row[0] is not None else None
+
+
+def _structure_base(facility_type: str | None, activity: str | None) -> dict:
+    """设施本体倍率：精炼建筑只对反应生效，工程建筑只对非反应生效，不匹配按 NPC（1.0）。
+
+    游戏里精炼建筑不能制造、工程建筑不能反应；用户若把反应计划挂在莱塔卢机库上，
+    给 1.0 而不是莱塔卢的制造加成（不能凭空给出一个游戏里拿不到的加成）。
+    `activity=None`（机库设置页展示）照旧返回本体值。
+    """
+    base = STRUCTURE_BASE.get(facility_type or "npc", STRUCTURE_BASE["npc"])
+    if activity is None or not base["rig_size"]:
+        return base
+    if bool(base.get("reaction_only")) != (activity == "reaction"):
+        return STRUCTURE_BASE["npc"]
+    return base
+
+
 def resolve_hangar_industry_config(
     hangar_id: int | None,
     *,
@@ -422,23 +533,37 @@ def resolve_hangar_industry_config(
     facility_type: str | None = None
     facility_tax: float | None = None
     rig_ids: list[int] = []
+    solar_system_id: int | None = None
     if hangar_id:
         with conn_mgr.connect("user") as conn:
-            row = conn.execute(
-                "SELECT facility_type, facility_tax, rigs FROM hangars WHERE id = ?",
-                (hangar_id,),
-            ).fetchone()
+            # 只取存在的列：v5 之前的库没有 solar_system_id、v6 之前没有设施三列 —— 缺列按默认
+            # （NPC、无改件、高安），与升级前的计算结果一致，不让计划侧的批量计算因一张旧表崩掉。
+            cols = {str(r[1]) for r in conn.execute("PRAGMA table_info(hangars)")}
+            wanted = [c for c in ("facility_type", "facility_tax", "rigs", "solar_system_id") if c in cols]
+            row = (
+                conn.execute(f"SELECT {', '.join(wanted)} FROM hangars WHERE id = ?", (hangar_id,)).fetchone()
+                if wanted
+                else None
+            )
             if row:
-                facility_type = row[0]
-                facility_tax = row[1]
-                rig_ids = parse_rigs(row[2])
+                got = dict(zip(wanted, row, strict=True))
+                facility_type = got.get("facility_type")
+                facility_tax = got.get("facility_tax")
+                rig_ids = parse_rigs(got.get("rigs"))
+                solar_system_id = got.get("solar_system_id")
     if blueprint_category is None and product_type_id and rig_ids:
-        blueprint_category = _blueprint_rig_category(product_type_id, _db=_db)
-    base = STRUCTURE_BASE.get(facility_type or "npc", STRUCTURE_BASE["npc"])
+        if activity == "reaction":
+            blueprint_category = _reaction_rig_category(product_type_id, _db=_db)
+        else:
+            blueprint_category = _blueprint_rig_category(product_type_id, _db=_db)
+    security = _system_security(solar_system_id, _db=_db) if rig_ids else None
+    base = _structure_base(facility_type, activity)
     mat_mult, time_mult = resolve_rig_multipliers(
-        rig_ids, activity=activity, blueprint_category=blueprint_category, _db=_db
+        rig_ids, activity=activity, blueprint_category=blueprint_category, security=security, _db=_db
     )
-    cost_mult = resolve_rig_cost_multiplier(rig_ids, activity=activity, blueprint_category=blueprint_category, _db=_db)
+    cost_mult = resolve_rig_cost_multiplier(
+        rig_ids, activity=activity, blueprint_category=blueprint_category, security=security, _db=_db
+    )
     return {
         "structure_mat_saving": round(base["mat"] * mat_mult, 6),
         "structure_time_mod": round(base["time"] * time_mult, 6),
@@ -447,4 +572,56 @@ def resolve_hangar_industry_config(
         "facility_tax": facility_tax,
         "facility_type": facility_type,
         "rig_ids": rig_ids,
+        "security": security,
     }
+
+
+def manufacturing_mat_saving(
+    hangar_id: int | None,
+    product_type_id: int | None,
+    *,
+    cache: dict[tuple[int, int], float] | None = None,
+    _db: DatabaseManager | None = None,
+) -> float:
+    """计划侧「这条制造作业在这个机库里的材料倍率」（建筑 × 匹配的改装件 × 安等），无机库 → 1.0。
+
+    与评分 / 启动闸门（`scoring_service.calculate_plan_metrics` → `resolve_hangar_industry_config`）
+    同一来源；子项拆解、拆解预览、采购聚合三处以前不乘它，于是同一计划两套材料数（BL-052-1）。
+    `cache` 由调用方在一次批量计算内复用（键 = (机库, 产物)），避免逐材料查库。
+    """
+    if not hangar_id:
+        return 1.0
+    key = (int(hangar_id), int(product_type_id or 0))
+    if cache is not None and key in cache:
+        return cache[key]
+    val = float(
+        resolve_hangar_industry_config(
+            int(hangar_id), activity="manufacturing", product_type_id=product_type_id, _db=_db
+        )["structure_mat_saving"]
+    )
+    if cache is not None:
+        cache[key] = val
+    return val
+
+
+def reaction_mat_saving(
+    hangar_id: int | None,
+    product_type_id: int | None,
+    *,
+    cache: dict[tuple[int, int], float] | None = None,
+    _db: DatabaseManager | None = None,
+) -> float:
+    """反应作业在这个机库里的材料倍率（精炼建筑 × 反应改装件 × 安等），无机库 → 1.0。缓存键与制造分开。"""
+    if not hangar_id:
+        return 1.0
+    key = (int(hangar_id), -int(product_type_id or 0))
+    if cache is not None and key in cache:
+        return cache[key]
+    val = float(
+        resolve_hangar_industry_config(int(hangar_id), activity="reaction", product_type_id=product_type_id, _db=_db)[
+            "structure_mat_saving"
+        ]
+    )
+    if cache is not None:
+        cache[key] = val
+    return val

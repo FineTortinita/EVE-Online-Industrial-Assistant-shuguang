@@ -1316,18 +1316,25 @@ class ScoringService:
             return {}
         from services.hangar_industry_config import resolve_hangar_industry_config
 
-        structure_bonus, structure_time_mod, structure_mat_saving = 0.0, 1.0, 1.0
+        # 设施倍率按活动分开解析：精炼建筑只给反应加成、工程建筑只给制造加成
+        # （`hangar_industry_config._structure_base`），同一机库对两类配方给出的倍率不同。
+        fac: dict[str, tuple[float, float, float]] = {"manufacturing": (0.0, 1.0, 1.0), "reaction": (0.0, 1.0, 1.0)}
         if hangar_id:
-            cfg = resolve_hangar_industry_config(hangar_id, _db=self._db)
-            structure_bonus = float(cfg["structure_cost_mult"]) - 1.0
-            structure_time_mod = float(cfg["structure_time_mod"])
-            structure_mat_saving = float(cfg["structure_mat_saving"])
+            for act in fac:
+                cfg = resolve_hangar_industry_config(hangar_id, activity=act, _db=self._db)
+                fac[act] = (
+                    float(cfg["structure_cost_mult"]) - 1.0,
+                    float(cfg["structure_time_mod"]),
+                    float(cfg["structure_mat_saving"]),
+                )
             if system_id is None:
                 from services.inventory_manager import get_hangar_system_id
 
                 system_id = get_hangar_system_id(hangar_id, _db=self._db)
             if facility_tax_pct <= 0 and cfg.get("facility_tax") is not None:
                 facility_tax_pct = float(cfg["facility_tax"])
+        structure_bonus, structure_time_mod, structure_mat_saving = fac["manufacturing"]
+        r_bonus, r_time, r_mat = fac["reaction"]
 
         levels = self._best_blueprint_levels(ids)
         reaction_ids = self._reaction_product_ids(ids)
@@ -1345,7 +1352,9 @@ class ScoringService:
                         price_type_prod=price_type_mat,
                         system_id=system_id,
                         facility_tax_pct=facility_tax_pct,
-                        structure_bonus=structure_bonus,
+                        structure_bonus=r_bonus,
+                        structure_time_mod=r_time,
+                        structure_mat_saving=r_mat,
                     )
                 else:
                     result = self.calc_manufacturing_score(
@@ -1470,6 +1479,8 @@ class ScoringService:
         price_type_prod: str = "sell",
         system_id: int | None = None,
         structure_bonus: float = 0.0,
+        structure_time_mod: float = 1.0,
+        structure_mat_saving: float = 1.0,
     ) -> dict:
         """计算反应（Reaction）利润评分。纯算法在 domain.scoring，编排在 services.scoring_facade。"""
         from services.scoring_facade import calc_reaction_score as _facade
@@ -1485,4 +1496,6 @@ class ScoringService:
             price_type_prod=price_type_prod,
             system_id=system_id,
             structure_bonus=structure_bonus,
+            structure_time_mod=structure_time_mod,
+            structure_mat_saving=structure_mat_saving,
         )

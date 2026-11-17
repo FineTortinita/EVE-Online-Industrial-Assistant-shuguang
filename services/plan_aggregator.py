@@ -646,7 +646,9 @@ def _plan_total_runs(plan: dict) -> int:
     return max(int(plan.get("runs") or 0), 0) * max(int(plan.get("parallels") or 1), 1)
 
 
-def _manufacturing_need(qty: int, wastefactor: int, me_level: int, runs: int, parallels: int) -> int:
+def _manufacturing_need(
+    qty: int, wastefactor: int, me_level: int, runs: int, parallels: int, mat_saving: float = 1.0
+) -> int:
     """一条制造配方的采购/校验需求 = **逐线各自整批取整再求和**。
 
     每条并行线在 EVE 里是**独立作业**（一条线一张蓝图），取整只作用于单个作业：
@@ -657,8 +659,11 @@ def _manufacturing_need(qty: int, wastefactor: int, me_level: int, runs: int, pa
     **少要货**（实测计划 477「咒逐级」runs=1/parallels=6/ME3：聚变推进器整批 175、
     逐线 30×6=180；按 175 采购后逐条启动，第 6 条误报缺 5（25/30）。同一批受影响的
     还有 线性护盾 88→90、纳米电子 961→966、超立方 350→354）。
+
+    `mat_saving` = 该计划材料机库的建筑 × 改装件 × 安等倍率（`manufacturing_mat_saving`），
+    与启动闸门同源；以前不乘它，采购清单按 NPC 口径多报（BL-052-1）。
     """
-    return calc_material_for_runs(qty, wastefactor, me_level, max(1, int(runs))) * max(1, int(parallels))
+    return calc_material_for_runs(qty, wastefactor, me_level, max(1, int(runs)), mat_saving) * max(1, int(parallels))
 
 
 def _science_material_requirements(plan: dict) -> list[dict]:
@@ -687,6 +692,34 @@ def _cache_item_meta(conn, mid: int, names: dict, volumes: dict, zh_en: dict) ->
     zh_en[mid] = (r[0], r[1]) if r else (None, None)
     names[mid] = _resolve_name(conn, mid)
     volumes[mid] = float(r[2]) if r and r[2] else 0.0
+
+
+def _plan_mat_saving(plan: dict, cache: dict[tuple[int, int], float], activity: str = ACTIVITY_MANUFACTURING) -> float:
+    """计划材料机库对该产物的材料倍率（制造 / 反应各按自己的建筑与改装件）；无机库 → 1.0。"""
+    from services.hangar_industry_config import manufacturing_mat_saving, reaction_mat_saving
+
+    pid = int(plan.get("product_type_id") or 0)
+    if activity == ACTIVITY_REACTION:
+        return reaction_mat_saving(plan.get("mat_hangar_id"), pid, cache=cache)
+    return manufacturing_mat_saving(plan.get("mat_hangar_id"), pid, cache=cache)
+
+
+def _plan_recipe(conn, plan: dict, pid: int) -> tuple[list[tuple[int, int, int]], str] | None:
+    """计划自己那张配方的材料 → ([(材料, 基础量, wastefactor)], 活动)；查不到 → None。
+
+    反应计划（`activity='reaction'`）取反应配方；以前这里只认制造配方，反应计划整行进不了
+    待采购 / 填料总表（BL-052 D5）。
+    """
+    act = ACTIVITY_REACTION if normalize(plan.get("activity")) == ACTIVITY_REACTION else ACTIVITY_MANUFACTURING
+    bp = get_blueprint_products(conn, pid, act)
+    if not bp:
+        return None
+    mats = conn.execute(
+        "SELECT material_type_id, quantity, COALESCE(wastefactor,10) FROM blueprint_materials "
+        "WHERE blueprint_type_id=? AND activity=?",
+        (bp[0], act),
+    ).fetchall()
+    return [(int(m), int(q), int(w)) for m, q, w in mats], act
 
 
 def aggregate_procurement(
@@ -730,6 +763,7 @@ def aggregate_procurement(
     # 1. 每个计划取直接材料；由子项产线自制的组件排除（其原材料由子线计划计入）。
     #    未拆解的组件 / 子线被删后 → 回到待采购。
     sub_prod_ids = self_made_type_ids(plans) if self_made is None else {int(t) for t in self_made}
+    saving_cache: dict[tuple[int, int], float] = {}
     group_need: dict[int | None, dict[int, float]] = {}
     names: dict[int, str] = {}
     volumes: dict[int, float] = {}
@@ -761,19 +795,17 @@ def aggregate_procurement(
         me = int(plan.get("me_level") or 0)
         runs = max(int(plan.get("runs") or 0), 0)
         parallels = max(int(plan.get("parallels") or 1), 1)
-        bp = get_blueprint_products(conn, pid, ACTIVITY_MANUFACTURING)
-        if not bp:
+        recipe = _plan_recipe(conn, plan, pid)
+        if recipe is None:
             continue
-        mats = conn.execute(
-            "SELECT material_type_id, quantity, COALESCE(wastefactor,10) FROM blueprint_materials "
-            "WHERE blueprint_type_id=? AND activity='manufacturing'",
-            (bp[0],),
-        ).fetchall()
+        mats, act = recipe
+        if act == ACTIVITY_REACTION:
+            me = 0  # 反应没有材料效率
         for mid, qty, wf in mats:
             if mid in sub_prod_ids:
                 continue  # 自制组件：由子项产线覆盖，买其原材料（子线计划已计入）
             # 逐线（逐作业）取整再求和：与启动闸门 `material_requirements` 同口径
-            need = _manufacturing_need(qty, wf, me, runs, parallels)
+            need = _manufacturing_need(qty, wf, me, runs, parallels, _plan_mat_saving(plan, saving_cache, act))
             bucket[mid] = bucket.get(mid, 0.0) + float(need)
             _cache_item_meta(conn, mid, names, volumes, zh_en)
 
@@ -889,6 +921,7 @@ def collect_direct_materials(conn, plans: list[dict]) -> dict[int, dict]:
         if p.get("product_type_id") and int(p.get("child_level") or p.get("sub_level") or 0) > 0
     }
     result: dict[int, dict] = {}
+    saving_cache: dict[tuple[int, int], float] = {}
     for plan in plans:
         if is_science(plan.get("activity")):
             if _plan_total_runs(plan) <= 0:
@@ -912,19 +945,17 @@ def collect_direct_materials(conn, plans: list[dict]) -> dict[int, dict]:
         me = int(plan.get("me_level") or 0)
         runs = max(int(plan.get("runs") or 0), 0)
         parallels = max(int(plan.get("parallels") or 1), 1)
-        bp = get_blueprint_products(conn, pid, ACTIVITY_MANUFACTURING)
-        if not bp:
+        recipe = _plan_recipe(conn, plan, pid)
+        if recipe is None:
             continue
-        mats = conn.execute(
-            "SELECT material_type_id, quantity, COALESCE(wastefactor,10) FROM blueprint_materials "
-            "WHERE blueprint_type_id=? AND activity='manufacturing'",
-            (bp[0],),
-        ).fetchall()
+        mats, act = recipe
+        if act == ACTIVITY_REACTION:
+            me = 0  # 反应没有材料效率
         for mid, qty, wf in mats:
             if mid in sub_prod_ids:
                 continue  # 自制组件：由子项产线覆盖，买其原材料（子线计划已计入）
             # 逐线（逐作业）取整再求和：与 aggregate_procurement / 启动闸门同口径
-            need = _manufacturing_need(qty, wf, me, runs, parallels)
+            need = _manufacturing_need(qty, wf, me, runs, parallels, _plan_mat_saving(plan, saving_cache, act))
             entry = result.get(mid)
             if entry is None:
                 entry = result[mid] = _item_meta_entry(conn, mid)

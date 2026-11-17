@@ -13,6 +13,35 @@
 
 ---
 
+## BL-052 工业计算口径偏差（重构阶段 1，见 `docs/dev/industry-refactor-plan.md`）
+
+- 状态：fixed（2026-11-17，工作区待提交，待用户复核）
+- 证据（真实读到的 `文件:行号`）：
+  1. 计划侧没乘建筑 + 改装件材料加成：`services/plan_rebuild.py:300,321`、`services/plan_decompose.py:118`、
+     `services/plan_aggregator.py:661` 调 `calc_material_for_runs` 时 `structure_mat_saving` 走默认 1.0；
+     而评分 / 启动闸门（`services/scoring_service.py:606` → `domain/scoring.py`）乘了 → 同一计划子项流程 / 采购量与启动闸门两套数。
+     真实库机库 1 是莱塔卢（`facility_type='raitaru'`，材料 ×0.99），这两套数在用户数据上已经分叉。
+  2. 改装件无安等系数：`services/hangar_industry_config.py:318,351` 直接 `Π(1+bonus/100)`；游戏里高安 ×1.0 / 低安 ×1.9 / 00·虫洞 ×2.1。
+  3. 反应安装费用旧口径 `0.05 × 收入 × 指数 × (1−建筑) × (1+税)`（`domain/scoring.py:469-470`），不走 EIV、不含 SCC 4%；
+     反应时间不吃建筑时间加成；`STRUCTURE_BASE`（`services/hangar_industry_config.py:31`）无阿塔诺 / 塔塔拉，反应改装件组 1933-1939 未导入。
+  4. 材料取整 `ceil(x − 1e-10)`（`domain/formulas.py:141`）而游戏是 `ceil(round(x, 2))`：x=100.004 时游戏 100、本应用 101。
+  5. 植入体已导入人物配置（`data/char_config.json` 的 `implants`，例 27171 = 制造时间 −4%）但时间计算不读（`domain/formulas.py:254`）。
+- 不在本条：反应计划进采购 —— 计划系统目前根本不建反应计划（`production_plans` 真实库 13 行全是 manufacturing），属阶段 2「引擎 + 反应轨」新功能。
+  `services/bom_expander.py:213`（查询页 BOM，无机库语境）同样留阶段 2 由统一引擎接管。
+- 修复中另查出：
+  6. `compute_child_forest` 展开中间件下级时只按**一条线**的轮数（`node["runs"]` 是每条线的轮数），
+     并行 > 1 的中间件少算下级需求；母项侧却按 `runs × parallels` 整批算 —— 两处口径也不同。现统一为「逐线整批取整 × 并行」。
+- 修法：`domain/formulas.py` 游戏取整 `ceil(round(x,2))` + `max(runs, …)`、`security_band` / `rig_bonus_multiplier` /
+  `implant_time_multiplier`；`services/hangar_industry_config.py` 加阿塔诺 / 塔塔拉（只对反应生效）、反应改件组 1933-1939 与
+  配方类别匹配、改件按星系安等放大、新增 `manufacturing_mat_saving`（计划侧三处共用）；反应安装费改走 `calc_job_cost_fees`；
+  `getrigdata` 补拉反应改件（属性 2713/2714）。安等系数与塔塔拉 0.75 为曙光 ESI 2026-11-17 实测值。
+- 验证：新增回归 —— 取整 / 安等档位 / 植入体（参数化）、开明网乌鸦级金样例（流程 23/45/6、边角料 1/138，与开明网一致）、
+  安等 × 精炼建筑 × 活动 7 组参数化、反应费 EIV+SCC、子项按机库倍率 + 并行展开。
+- 阶段 2 收尾（同日）：D5 反应计划进待采购 / 填料总表（`plan_aggregator._plan_recipe`）与计划评分（`calculate_plan_metrics` 反应分支）；
+  D8 三套展开器收敛到 `domain/industry_calc.py`，`domain/bom.py` 删除。层级口径从「最浅出现」改为「最长路径」（T2 / 开明网同口径），
+  真实库 13 行计划（阿兹贝尔母项 + 12 子项）迁移前后 demand / runs / 子级逐行一致（库副本实测）。
+- 影响：已有计划在**莱塔卢**等工程建筑机库上的子项需求 / 采购量会略降（×0.99），与启动检查对齐；需打开机库设置重新拉取一次改件数据才会出现反应改件。
+
 ## BL-001 查询页用户手册写了工具栏里已不存在的两个按钮
 
 - 类型：缺陷

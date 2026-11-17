@@ -108,14 +108,20 @@ def parent_needs(conn: Connection, group_plans: list[dict]) -> dict[int, int]:
     """
     needs: dict[int, int] = {}
     parents = [p for p in group_plans if int(p.get("sub_level") or 0) == 0]
+    from services.hangar_industry_config import manufacturing_mat_saving
+
+    saving_cache: dict[tuple[int, int], float] = {}
     for p in parents:
-        root_runs = max(int(p.get("runs") or 1), 1) * max(int(p.get("parallels") or 1), 1)
+        runs = max(int(p.get("runs") or 1), 1)
+        parallels = max(int(p.get("parallels") or 1), 1)
         parent_me = int(p.get("me_level") or 0)
         bp = _find_blueprint_for_product(conn, p["product_type_id"], "manufacturing")
         if not bp:
             continue
+        # 与 `plan_rebuild.compute_child_forest` 同口径：逐线整批取整 × 并行、乘母项机库材料倍率
+        saving = manufacturing_mat_saving(p.get("mat_hangar_id"), int(p["product_type_id"]), cache=saving_cache)
         for mat_id, mat_base in _get_materials(conn, bp[0], "manufacturing"):
-            qty = calc_material_for_runs(mat_base, 10, parent_me, root_runs)
+            qty = calc_material_for_runs(mat_base, 10, parent_me, runs, saving) * parallels
             needs[mat_id] = needs.get(mat_id, 0) + qty
     return needs
 

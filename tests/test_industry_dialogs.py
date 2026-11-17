@@ -406,8 +406,11 @@ def _build_dbs(db_manager):
             "solar_system_id INTEGER, deposit_hangar_id INTEGER, materials_ready INTEGER DEFAULT 0, "
             "source_mother_ids TEXT DEFAULT '', component_parent_type_id INTEGER, demand INTEGER DEFAULT 0)"
         )
-        conn.execute("CREATE TABLE hangars (id INTEGER PRIMARY KEY, name TEXT, solar_system_id INTEGER)")
-        conn.execute("INSERT INTO hangars VALUES (1,'矿仓',30000145)")
+        conn.execute(
+            "CREATE TABLE hangars (id INTEGER PRIMARY KEY, name TEXT, solar_system_id INTEGER, "
+            "facility_type TEXT, facility_tax REAL, rigs TEXT)"  # v6 起机库带设施配置，拆解按它算材料倍率
+        )
+        conn.execute("INSERT INTO hangars (id, name, solar_system_id) VALUES (1,'矿仓',30000145)")
         conn.execute(
             "CREATE TABLE inventory_items (id INTEGER PRIMARY KEY, hangar_id INTEGER, "
             "type_id INTEGER, quantity INTEGER, cost_price REAL)"

@@ -176,7 +176,7 @@ def test_rig_label_formats_bonuses():
 def test_base_bonus_text_covers_npc_and_structures():
     assert hsb.base_bonus_text(None) == "NPC 空间站无结构本体加成，不可装配改装件"
     assert hsb.base_bonus_text("npc") == "NPC 空间站无结构本体加成，不可装配改装件"
-    assert hsb.base_bonus_text("raitaru") == "材料 0.99 / 成本 0.97 / 时间 0.85（NPC=1.0）"
+    assert hsb.base_bonus_text("raitaru") == "材料 0.99 / 成本 0.97 / 时间 0.85（NPC=1.0）；改装件按星系安等放大"
 
 
 def test_summary_text_wording():
@@ -222,7 +222,7 @@ def test_editor_loads_the_stored_config(qapp, monkeypatch):
     assert bridge.facilityIndex == 1  # _FACILITY_ORDER 里 raitaru 排第二
     assert bridge.taxFollowDefault is False
     assert bridge.taxValue == 0.5
-    assert bridge.baseBonusText == "材料 0.99 / 成本 0.97 / 时间 0.85（NPC=1.0）"
+    assert bridge.baseBonusText == "材料 0.99 / 成本 0.97 / 时间 0.85（NPC=1.0）；改装件按星系安等放大"
     assert [item["checked"] for item in _rig_items(bridge)] == [True, False, True]
     assert [g["label"] for g in bridge.rigGroups] == ["装备制造", "弹药制造"]
 

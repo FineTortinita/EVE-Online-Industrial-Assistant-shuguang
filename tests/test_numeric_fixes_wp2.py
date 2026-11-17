@@ -241,3 +241,44 @@ def test_eiv_uses_adjusted_when_all_available():
     breakdown = result["breakdown"]
     assert breakdown["eiv_source"] == "adjusted"
     assert breakdown["eiv"] == pytest.approx(2 * 100.0 + 2 * 50.0)
+
+
+# ════════════════════════════════════════════════════════════════
+#  BL-052-3 — 反应安装费与制造同一公式（EIV × (SCI×建筑 + 税 + SCC)），时间吃建筑
+# ════════════════════════════════════════════════════════════════
+
+
+class _SciPrices(_FakePrices):
+    def get_system_cost_index(self, system_id, activity="manufacturing", hub="Jita"):
+        return 0.02
+
+    def get_volume(self, type_id, vol_type="total", hub=None):
+        return 1_000_000  # 有成交量才会走到填 breakdown 的分支
+
+
+def test_reaction_fee_uses_eiv_and_scc_and_structure_time():
+    from domain.scoring import calc_reaction_score
+
+    r = calc_reaction_score(
+        product_type_id=1,
+        prod_qty=200,
+        base_time=10_800,
+        prod_price=1_000_000.0,  # 收入 2 亿：旧口径的费用随收入走，新口径与收入无关
+        materials=((11, "料A", 100), (12, "料B", 100)),
+        prices=_SciPrices({11: 500.0, 12: 500.0}, {11: 400.0, 12: 600.0}),
+        char_config={"skills": {}},
+        mat_source_hub="Jita",
+        sell_hub="Jita",
+        price_type_mat="sell",
+        system_id=None,
+        structure_bonus=0.0,
+        facility_tax_pct=0.25,
+        structure_time_mod=0.75,
+        structure_mat_saving=0.976,
+    )
+    bd = r["breakdown"]
+    eiv = 100 * 400 + 100 * 600
+    assert bd["eiv"] == eiv and bd["eiv_source"] == "adjusted"
+    assert bd["reaction_install_fee"] == pytest.approx(eiv * (0.02 + 0.0025 + 0.04), abs=0.01)
+    assert r["materials"][0]["qty"] == 98  # ceil(round(100 × 0.976, 2)) = ceil(97.6)
+    assert r["hours_per_run"] == pytest.approx(3 * 0.75, abs=0.01)

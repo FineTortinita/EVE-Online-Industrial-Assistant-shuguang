@@ -15,12 +15,13 @@ from typing import Any
 import services.scoring_service as _ss
 from core.constants import TRADE_HUB_IDS
 from core.logger import log
-from domain.formulas import BP_TIME_SKILL_TYPE_IDS
+from domain.formulas import BP_TIME_SKILL_TYPE_IDS, implant_time_multiplier
 from domain.scoring import BlueprintRecipe, Material
 from domain.scoring import calc_manufacturing_score as _pure_calc
 from domain.scoring import calc_reaction_score as _pure_reaction
 from domain.scoring import calc_trade_score as _pure_trade
 from services.blueprint_reader import get_blueprint_products
+from services.implant_loader import manufacturing_time_bonuses
 from services.repositories.market_repository import MarketRepository
 
 
@@ -258,6 +259,8 @@ def calc_manufacturing_score(
             structure_mat_saving=structure_mat_saving,
             facility_tax_pct=facility_tax_pct,
             is_alpha=is_alpha,
+            # 植入体（人物配置 `implants`，如 BX-804 制造时间 −4%）乘进生产时间（BL-052-5）
+            implant_time_mult=implant_time_multiplier(manufacturing_time_bonuses((char_config or {}).get("implants"))),
             mat_price_mult=mat_price_mult,
             bp_required_skills=bp_required_skills,
         )
@@ -347,6 +350,8 @@ def calc_reaction_score(
     price_type_prod: str,
     system_id: int | None,
     structure_bonus: float,
+    structure_time_mod: float = 1.0,
+    structure_mat_saving: float = 1.0,
 ) -> dict[str, Any]:
     """反应评分用例：编排 DB 读取 + 领域纯函数（反应无缓存）。"""
     result: dict[str, Any] = {
@@ -407,6 +412,8 @@ def calc_reaction_score(
             system_id=system_id,
             structure_bonus=structure_bonus,
             facility_tax_pct=facility_tax_pct,
+            structure_time_mod=structure_time_mod,
+            structure_mat_saving=structure_mat_saving,
         )
 
     return result
