@@ -38,6 +38,7 @@ from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QDialog
 
 from core.cache import TtlLRUCache
+from core.constants import TRADE_HUB_IDS, TRADE_HUBS
 from core.container import get_container
 from core.logger import log
 from core.paths import data_dir
@@ -47,9 +48,12 @@ from ui_qml.constants import CATEGORIES, MFG_CATEGORIES
 from ui_qml.dialog_host import DialogBridge, QmlDialog
 from ui_qml.models.all_items_models import BCOLS, DASH, MCOLS, TCOLS, Proxy
 from ui_qml.models.all_items_qml_model import AllItemsQmlModel, icon_url
-from ui_qml.workers.all_items_workers import JITA_RID, ItemsW, SearchItemsW, TreeW
+from ui_qml.workers.all_items_workers import ItemsW, SearchItemsW, TreeW
 from ui_qml.workers.lifecycle import detach_worker, drop_worker
 from ui_qml.workers.score_worker import ScoreW
+
+#: 默认价格区域 = 首个贸易中心（与查询页 `QueryBridge` 同源）
+DEFAULT_RID = TRADE_HUB_IDS[TRADE_HUBS[0]]
 
 __all__ = [
     "AllItemsBridge",
@@ -320,7 +324,9 @@ class AllItemsBridge(DialogBridge):
         #: 价格查询区域（查询页右上角那个下拉）。原先 `_reload_items` / `_do_search`
         #: **硬编码** `JITA_RID`，所以换区域对它毫无影响 —— 用户报的「右上角选价格区域
         #: 对全物品不生效」就是这个。现在由 `QueryBridge.setRegionIndex` 经 `setRegionId` 转发。
-        self._region_id = JITA_RID
+        #: 默认与查询页一致（首个贸易中心）。两边不一致时，查询页建桥后补的 `setRegionId`
+        #: 会被当成「换了区域」而立刻起线程重取（PR #2 CI：无库环境下该线程在事件循环里抛错）。
+        self._region_id = DEFAULT_RID
         #: 当前列表对应的分类 id 集合（`None` = 全量）。换价格区域时按**同一批 id**
         #: 重取，而不是退回全量 —— 否则切个区域就把用户选中的分类丢了。
         self._cur_ids: list[Any] | None = None
@@ -421,11 +427,10 @@ class AllItemsBridge(DialogBridge):
 
         换完按**同一批 id** 重取（`_cur_ids`），不退回全量：那会把用户选中的分类丢掉。
         """
-        rid = int(region_id) or JITA_RID
+        rid = int(region_id) or DEFAULT_RID
         if rid == self._region_id:
             return
         self._region_id = rid
-        from core.constants import TRADE_HUB_IDS
 
         hub = next((h for h, r in TRADE_HUB_IDS.items() if r == rid), None)
         if hub:

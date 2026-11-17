@@ -51,6 +51,19 @@ def test_region_index_round_trips(bridge):
     assert bridge.regionIndex == 1
 
 
+@pytest.mark.ui
+def test_all_items_panel_starts_at_default_region_without_refetch(bridge, monkeypatch):
+    """PR #2 CI 回归：查询页建「全物品」桥后补一次当前区域。两边默认区域不一致时，
+    这次补设被当成换区域、立刻起 ItemsW 线程（无库环境在事件循环里抛 `no such table: item`）。"""
+    from ui_qml.bridge import all_items_bridge
+
+    started: list = []
+    monkeypatch.setattr(all_items_bridge.ItemsW, "start", lambda self: started.append(self))
+    panel = bridge.allItems
+    assert panel._region_id == bridge._region_id
+    assert started == []
+
+
 class _Recorder:
     """假详情桥：只记录被推了什么，用来验证 `QueryBridge → detail` 的驱动时序。
 

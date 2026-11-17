@@ -15,9 +15,9 @@ from PySide6.QtGui import QGuiApplication
 
 from tests.clipboard_wait import wait_for_clipboard
 from ui_qml.bridge import all_items_bridge as ai
+from ui_qml.bridge.all_items_bridge import DEFAULT_RID
 from ui_qml.dialog_host import QmlDialog
 from ui_qml.models.all_items_models import BCOLS, MCOLS, TCOLS
-from ui_qml.workers.all_items_workers import JITA_RID
 from ui_qml.workers.lifecycle import DEFAULT_WAIT_MS
 
 pytestmark = pytest.mark.ui
@@ -463,7 +463,7 @@ def test_search_is_debounced_then_runs(qapp):
 
         bridge._do_search()  # type: ignore[attr-defined]
         assert bridge.statusText == "搜索中..."
-        assert bridge._sw.args == ["渡鸦", JITA_RID]  # type: ignore[attr-defined]
+        assert bridge._sw.args == ["渡鸦", DEFAULT_RID]  # type: ignore[attr-defined]
     finally:
         dlg.deleteLater()
 
