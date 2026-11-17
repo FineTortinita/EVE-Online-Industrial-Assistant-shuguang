@@ -12,17 +12,16 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Hashable
 
 from core.constants import PLAN_LOCKED_STATUSES, PLAN_TERMINAL_STATUSES
 from core.container import get_container
 from core.logger import log
-from domain.formulas import calc_material_for_runs
+from domain.industry_calc import ACTIVITY_MANUFACTURING, ACTIVITY_REACTION, Target, calculate
 from services import inventory_manager
-from services.bom_expander import _find_blueprint_for_product, _get_materials
+from services.blueprint_reader import SqliteBlueprintReader
+from services.hangar_industry_config import manufacturing_mat_saving
 from services.plan_decompose import best_inventory_blueprint
-
-# 迭代收敛上限：跨层共享的组件需求在 2-3 轮内稳定，留足余量。
-_MAX_ROUNDS = 10
 
 # 母项参与重放的排除状态
 _DONE_STATUSES = PLAN_TERMINAL_STATUSES
@@ -84,59 +83,6 @@ def _collect_mothers(all_rows: list[dict]) -> list[dict]:
         if _group_of(r) > 0 or _mother_key(r) in referenced:
             mothers.append(r)
     return mothers
-
-
-def _accumulate(
-    conn,
-    nodes: dict[int, dict],
-    first_mother: dict,
-    type_id: int,
-    qty: int,
-    level: int,
-    parent_type_id: int,
-    existing_parallels: dict[int, int],
-) -> None:
-    """把 qty 记到 `type_id` 的需求上，并补全节点元数据。**这里不算 runs**。
-
-    runs 由 `compute_child_forest` 在「本轮需求收齐之后、展开下级之前」统一定稿
-    （`_finalize_runs`）—— 算早了就是拿半份需求去折算 runs，见那边关于共享中间件的说明。
-    """
-    if qty <= 0:
-        return
-    bp = _find_blueprint_for_product(conn, type_id, "manufacturing")
-    if not bp:
-        return
-    bp_id, output_qty, _ = bp
-    node = nodes.setdefault(
-        type_id,
-        {
-            "product_type_id": type_id,
-            "blueprint_type_id": bp_id,
-            "output_qty": output_qty or 1,
-            "demand": 0,
-            "runs": 0,
-            "parallels": int(existing_parallels.get(type_id, 1) or 1),  # 保留用户既有并行
-            "me_level": 0,
-            "te_level": 0,
-            "has_blueprint": False,
-            "sub_level": 99,
-            "sources": set(),
-            "parents": set(),
-            "first_mother": first_mother,
-        },
-    )
-    if _sub_level(first_mother) == 0:  # 仅母项来源计入 source 引用
-        node["sources"].add(int(first_mother.get("id") or 0))
-    node["parents"].add(parent_type_id)
-    if level < node["sub_level"]:
-        node["sub_level"] = level
-    node["demand"] += qty
-
-    ibp = best_inventory_blueprint(conn, bp_id)
-    node["me_level"] = ibp["me_level"] if ibp else 0
-    node["te_level"] = ibp["te_level"] if ibp else 0
-    node["has_blueprint"] = ibp is not None
-    node["blueprint_type_id"] = bp_id
 
 
 def plan_net_runs(demand: int, output_per_run: int, available: int, parallels: int) -> tuple[int, int, int]:
@@ -252,85 +198,78 @@ def _finalize_runs(node: dict, stocks: dict[int, dict[int, int]]) -> None:
 def compute_child_forest(
     conn, active_mothers: list[dict], stocks: dict[int, dict[int, int]], existing_parallels: dict[int, int]
 ) -> dict[int, dict]:
-    """全局需求传播 → {type_id: node}。
+    """全局需求传播 → {type_id: node}（子项节点 dict，供 `rebuild_children` / 拆解预览落库或展示）。
 
-    共享组件跨母项/跨层级需求自动累加为一行；`existing_parallels` 是用户既有并行产线数，
-    作为 `_finalize_runs` 里并行数寻优的**上界**（用户不设就按 1 条线排）。
-    `stocks` 是按母项 id 索引的「该母项制造机库」库存快照，用于把成品库存折进 runs
-    （净口径、并行数寻优与「为什么不重复计」见 `_finalize_runs`）。
+    计算本体在 `domain.industry_calc.calculate`（阶段 2 统一引擎）：全部活跃母项一起展开，
+    共享中间件跨母项 / 跨层合并为一个节点，**最长路径**定层级（浅层也要用的件推迟到最深层统一开工），
+    每个节点在上游需求收齐后只取整一次。本函数只负责把计划侧的口径接进去：
 
-    迭代形态：**每轮先把需求累齐，再定稿 runs，最后才拿 runs 去展开下级；每个节点每轮只展开一次。**
-    这是这套传播的命门，两个坑都出在违反它的时候：
+    - 排产 = `plan_net_runs`：扣「首个引用母项」材料机库里**这个成品自己**的库存（`stocks` 按母项 id），
+      并在用户既有并行数（`existing_parallels`，上界）内寻优，见 `_finalize_runs`；
+    - 材料倍率 = 首个引用母项材料机库的建筑 × 改装件 × 安等（`manufacturing_mat_saving`）；
+    - 中间件 ME/TE 取库存里最好的那张蓝图（`best_inventory_blueprint`），没有就 0/0；
+    - 只拆制造件：反应产物、无配方件按买入（反应轨见阶段 2 后半）。
 
-    - **别在累需求的过程中折算 runs**。曾经的写法是每个母项各展开一遍，节点一收到需求就
-      立刻算 runs 并用它展开下级 —— 共享中间件于是被展开两次：第一次按第一个母项的**部分**
-      需求算出的 runs，第二次按收齐后的 runs。下级的 demand 直接翻倍（实测 60 被算成 80）。
-    - **别用短路写递归**。曾经的 `changed = changed or _propagate(...)` 在本节点 runs 有变化时
-      根本不往下走 —— 而「正在变」恰恰是最该往下走的时候。多母项共享中间件时每轮都在变，
-      于是 level≥2 永远进不了 `nodes`；更糟的是 `prune` 按「type 不在 nodes 里」判孤儿，
-      会把**已经存在**的孙项行当孤儿删掉（先单母项拆解出孙项、再加第二个母项、再拆解一次 → 孙项消失）。
-
-    每轮从母项出发重置 demand；迭代到所有节点的 runs 都不再变（或达 `_MAX_ROUNDS`）为止，
-    跨层共享需要 2-3 轮。BOM 是严格 DAG（材料总是更低层级），故按 `sub_level` 由浅到深展开
-    每轮每个节点恰好一次就够，不需要额外的环检测。
+    节点 dict 字段与旧实现一致：product_type_id / blueprint_type_id / output_qty / demand / runs /
+    parallels / me_level / te_level / has_blueprint / sub_level / sources / parents / first_mother。
     """
+    mothers_by_id: dict[Hashable, dict] = {_mother_key(m): m for m in active_mothers}
+    targets = [
+        Target(
+            int(m["product_type_id"]),
+            runs=max(int(m.get("runs") or 1), 1),
+            parallels=max(int(m.get("parallels") or 1), 1),
+            me_level=int(m.get("me_level") or 0),
+            key=_mother_key(m),
+            activity=ACTIVITY_REACTION if (m.get("activity") or "") == ACTIVITY_REACTION else ACTIVITY_MANUFACTURING,
+        )
+        for m in active_mothers
+        if m.get("product_type_id")
+    ]
+    saving_cache: dict[tuple[int, int], float] = {}
+    bp_levels: dict[int, dict | None] = {}
+
+    def _levels(bp_id: int) -> dict | None:
+        if bp_id not in bp_levels:
+            bp_levels[bp_id] = best_inventory_blueprint(conn, bp_id)
+        return bp_levels[bp_id]
+
+    def _scheduler(node, demand: int) -> tuple[int, int]:
+        available = int(stocks.get(int(node.first_root or 0), {}).get(node.type_id, 0))
+        parallels = int(existing_parallels.get(node.type_id, 1) or 1)
+        par, runs, _net = plan_net_runs(demand, node.output_qty, available, parallels)
+        return par, runs
+
+    def _saving(type_id: int, _activity: str, root) -> float:
+        hangar = (mothers_by_id.get(root) or {}).get("mat_hangar_id")
+        return manufacturing_mat_saving(hangar, type_id, cache=saving_cache)
+
+    result = calculate(
+        SqliteBlueprintReader(conn),
+        targets,
+        scheduler=_scheduler,
+        saving=_saving,
+        me_for=lambda _t, bp_id, _a: int((_levels(bp_id) or {}).get("me_level", 0)),
+    )
     nodes: dict[int, dict] = {}
-
-    for _round in range(_MAX_ROUNDS):
-        # 上轮定稿的 (runs, parallels) 既作展开基准也作收敛判据。
-        # `parallels` 必须一起比：`_finalize_runs` 会做并行数寻优，可能出现「runs 没变、parallels
-        # 变了」的一轮 —— 只比 runs 就会提前收敛，库里留下 runs 按旧并行数摊出来的值。
-        prev = {tid: (int(n["runs"]), int(n["parallels"])) for tid, n in nodes.items()}
-        for n in nodes.values():
-            n["demand"] = 0
-
-        # ① 母项 → level 1：只累需求，不展开（展开要等这一层收齐）
-        for m in active_mothers:
-            root_runs = max(int(m.get("runs") or 1), 1) * max(int(m.get("parallels") or 1), 1)
-            bp = _find_blueprint_for_product(conn, m["product_type_id"], "manufacturing")
-            if not bp:
-                continue
-            parent_me = int(m.get("me_level") or 0)
-            for mat_id, mat_base in _get_materials(conn, bp[0], "manufacturing"):
-                _accumulate(
-                    conn,
-                    nodes,
-                    m,
-                    mat_id,
-                    calc_material_for_runs(mat_base, 10, parent_me, root_runs),
-                    level=1,
-                    parent_type_id=m["product_type_id"],
-                    existing_parallels=existing_parallels,
-                )
-
-        # ② 由浅到深展开：走到某个节点时它的需求已收齐 → 定稿 runs → 展开下级。
-        #    `sorted` 先把键取成快照：本轮中途新建的节点下一轮再展开（需求已记上，不会丢）。
-        changed = False
-        for tid in sorted(nodes, key=lambda t: (nodes[t]["sub_level"], t)):
-            node = nodes[tid]
-            _finalize_runs(node, stocks)
-            changed |= (int(node["runs"]), int(node["parallels"])) != prev.get(tid, (0, 0))
-            if node["runs"] <= 0:
-                continue
-            for mat_id, mat_base in _get_materials(conn, int(node["blueprint_type_id"]), "manufacturing"):
-                _accumulate(
-                    conn,
-                    nodes,
-                    node["first_mother"],
-                    mat_id,
-                    calc_material_for_runs(mat_base, 10, int(node["me_level"]), int(node["runs"])),
-                    level=int(node["sub_level"]) + 1,
-                    parent_type_id=tid,
-                    existing_parallels=existing_parallels,
-                )
-
-        if not changed:
-            break
-
-    # 收尾：没赶上快照的节点（本轮新建的）也定稿一次，别让它们带着 runs=0 出去。
-    # `_finalize_runs` 幂等，对已定稿的节点是空操作。
-    for node in nodes.values():
-        _finalize_runs(node, stocks)
+    for tid, n in result.nodes.items():
+        ibp = _levels(n.blueprint_type_id)
+        first = mothers_by_id.get(n.first_root) or {}
+        nodes[tid] = {
+            "product_type_id": tid,
+            "blueprint_type_id": n.blueprint_type_id,
+            "output_qty": n.output_qty,
+            "demand": n.demand,
+            "runs": n.runs,
+            "parallels": n.parallels,
+            "me_level": n.me_level,
+            "te_level": int(ibp["te_level"]) if ibp else 0,
+            "has_blueprint": ibp is not None,
+            "sub_level": n.depth,
+            "sources": {int(k) for k in n.roots if k and _sub_level(mothers_by_id.get(k) or {}) == 0},  # type: ignore[call-overload]  # 键是母项 id（int）
+            "parents": set(n.parents),
+            "first_mother": first,
+        }
     return nodes
 
 

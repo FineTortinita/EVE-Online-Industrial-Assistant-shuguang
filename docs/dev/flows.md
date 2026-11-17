@@ -104,18 +104,27 @@ UI（财务/运费/精炼/BOM）→ services/pricing_service.py PricingService
 - 数据落库：`services/importers/getprices` 写 `market_prices`/`market_volume_snapshots`；`getindustry` 写 `industry_system_costs`/`industry_facilities`
 - **并存约定**：评分链路走 `scoring_service.get_price`，其余 UI 链路走 `PricingService`——两套取价路径同时存在，改价需两边同步
 
-## BOM 递归展开
+## BOM 展开（统一引擎）
 
 ```
-services/bom_expander.py: expand_bom / get_material_tree / get_flat_materials（公共入口）
-  → _expand 递归（T2/T3 产业链）
-      · _find_blueprint_for_product：bp.blueprint_products JOIN bp.blueprint_activities
-      · _get_materials：bp.blueprint_materials
-      · calc_material_for_runs：domain/formulas.py
-      · 价格：_default_pricing().get_price（PricingService，mkt.market_prices）
+domain/industry_calc.py: calculate(reader, targets, build=, scheduler=, saving=, me_for=)
+  1. 发现自己造的中间件、建有向图（环上的回边按买入切断）
+  2. 层级 = 从任一成品出发的最长路径（浅分支也要用的件推迟到最深层统一开工）
+  3. 由浅到深：合并全部上游需求 → 排产回调定 (并行, 每线流程) → 逐线整批取整展开下级；多出 = 边角料
+  · 读配方：services/blueprint_reader.SqliteBlueprintReader（排除 CCP 测试蓝图）
+  · 数量：domain/formulas.calc_material_for_runs（游戏取整 + 单件豁免）
+
+调用方（各自只注入口径，不再自己递归）：
+  services/plan_rebuild.compute_child_forest  ← rebuild_children（落库）/ plan_decompose.decompose_plan（预览）
+      scheduler = plan_net_runs（扣首个引用母项机库里的成品库存 + 并行寻优）
+      saving    = manufacturing_mat_saving（首个引用母项材料机库的建筑 × 改装件 × 安等）
+      me_for    = best_inventory_blueprint（库存里最好的那张蓝图）
+  services/bom_expander.expand_bom            ← 查询详情「制造材料」、关注页材料、市场链
+  services/plan_aggregator.calculate_output_with_overflow（产出总表的「材料溢出」= 节点边角料）
 ```
 
-- UI 无直接调用方；内部查询被 `plan_decompose`、`plan_rebuild` 复用
+- 默认策略：制造件自己造、反应产物买入（计划拆解现行口径）；`build=` 可改成全造（开明网式计算）。
+- 反应计划（`activity='reaction'`）：评分走 `calc_reaction_score`（精炼建筑倍率），待采购 / 填料总表按反应配方。
 
 ## 精炼价值
 

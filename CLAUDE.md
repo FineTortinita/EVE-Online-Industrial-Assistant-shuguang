@@ -169,7 +169,7 @@ scripts/run_tests.sh full       # 全量（实测 5~8 分钟，看机器负载�
 | 改制造/贸易/精炼公式 | `domain/formulas.py`、`domain/scoring.py`（纯算法）、`core/eve_formulas.py` | `docs/dev/flows.md`；`docs/api/…` |
 | 改评分编排/取价 | `services/scoring_facade.py`（编排）、`services/scoring_service.py`（薄委托入口） | `docs/dev/flows.md`（评分节） |
 | 改统一定价/市场查询 | `services/pricing_service.py`、`services/repositories/market_repository.py` | `docs/dev/data.md`（market.db 表） |
-| 改 BOM 展开 | `services/bom_expander.py`、`domain/bom.py` | `docs/dev/flows.md`（BOM 节） |
+| 改 BOM 展开 | `domain/industry_calc.py`（统一引擎）、`services/bom_expander.py`、`services/plan_rebuild.py` | `docs/dev/flows.md`（BOM 节） |
 | 改生产计划 | `services/plan_service.py` + `services/repositories/plan_repository.py` + `plan_*.py` | `docs/dev/flows.md`（计划节） |
 | 改数据库 Schema | `services/schema_migrations.py`（迁移函数注册） | `docs/dev/schema-migration.md`；`docs/dev/data.md` |
 | 改数据导入（SDE/ESI） | `services/importers/get*.py`、`services/init_service.py` | `docs/dev/flows.md`（初始化节） |

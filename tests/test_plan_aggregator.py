@@ -41,6 +41,22 @@ class TestAggregateProcurement:
             mats = collect_direct_materials(conn, [plan])
         assert mats[1999]["total_qty"] == 161, "collect_direct_materials 必须与采购聚合同口径"
 
+    def test_reaction_plan_contributes_its_reaction_inputs(self, temp_db):
+        """BL-052 D5：反应计划（activity='reaction'）按**反应配方**进待采购 / 填料总表，反应无 ME。
+
+        以前两处只查制造配方，反应计划整行查不到配方被跳过 —— 卫星原料一个都不报。
+        """
+        with temp_db.connect("bp") as conn:
+            conn.execute("INSERT INTO blueprint_activities VALUES (3900, 'reaction', 10800)")
+            conn.execute("INSERT INTO blueprint_products VALUES (3900, 'reaction', 2900, 200)")
+            conn.execute("INSERT INTO blueprint_materials VALUES (3900, 'reaction', 1001, 100, 10)")
+        plan = {"product_type_id": 2900, "runs": 3, "parallels": 2, "me_level": 10, "activity": "reaction"}
+        with temp_db.connect("user", "ref", "bp", "mkt") as conn:
+            rows, _cost, _vol = aggregate_procurement(conn, [plan], price_type="sell")
+            mats = collect_direct_materials(conn, [plan])
+        assert {r["type_id"]: r["to_buy"] for r in rows} == {1001: 600}  # 100 × 3 流程 × 2 线，不吃 ME10
+        assert mats[1001]["total_qty"] == 600
+
     def test_basic_cost_and_volume(self, temp_db):
         """渡鸦级 1 流程：1000 三钛 + 500 类银；sell 价 5/9；无库存。"""
         plan = {"product_type_id": 2001, "runs": 1, "parallels": 1, "me_level": 0}

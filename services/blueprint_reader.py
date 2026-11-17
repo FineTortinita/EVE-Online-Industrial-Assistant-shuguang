@@ -148,7 +148,7 @@ def get_blueprint_products(
 
 
 class SqliteBlueprintReader:
-    """BlueprintReader 适配 — 基于 sqlite 连接的蓝图查询（实现 domain.bom.BlueprintReader）。"""
+    """BlueprintReader 适配 — 基于 sqlite 连接的蓝图查询（实现 domain.industry_calc.BlueprintReader）。"""
 
     def __init__(self, conn):
         self._conn = conn
@@ -160,4 +160,13 @@ class SqliteBlueprintReader:
         return (row[0], row[1])  # (blueprint_type_id, per_run_output)
 
     def materials(self, blueprint_type_id: int, activity: str = "manufacturing") -> list[tuple[int, int, int]]:
-        return get_blueprint_materials(self._conn, blueprint_type_id, activity)
+        try:
+            return get_blueprint_materials(self._conn, blueprint_type_id, activity)
+        except sqlite3.OperationalError:
+            # 只吞「blueprint_materials 没有 wastefactor 列」（旧库 / 精简测试库）：该列早已不参与计算，
+            # 退回只取 (材料, 基础量) 并补默认值。
+            rows = self._conn.execute(
+                "SELECT material_type_id, quantity FROM blueprint_materials WHERE blueprint_type_id = ? AND activity = ?",
+                (blueprint_type_id, activity),
+            ).fetchall()
+            return [(int(m), int(q), DEFAULT_WASTEFACTOR) for m, q in rows]

@@ -25,8 +25,8 @@ import math
 from typing import Any
 
 from core.logger import log
-from domain.bom import walk_bom
 from domain.formulas import calc_material_for_runs
+from domain.industry_calc import Target, calculate
 from domain.research import (
     ACTIVITY_COPYING,
     ACTIVITY_INVENTION,
@@ -522,26 +522,27 @@ def calculate_output_with_overflow(
         plan_value = plan_price * total_qty
         status = plan.get("status", "pending")
 
-        # 递归 BOM 查找中间产品溢出（全局 seen：共享中间产品只计一次）
+        # 中间产品溢出：走统一引擎（`domain.industry_calc`）按本计划单独展开 —— 共享中间件合并取整一次，
+        # 只看真的会被自制（存在子项产线）的件；纯采购的件买多少用多少，永远不溢出。
         overflow_details: list[dict] = []
-        reader = SqliteBlueprintReader(conn)
-        for step in walk_bom(reader, pid, total_qty, me_level=me, max_depth=max_depth, seen_mode="global"):
-            if step.blueprint is None:
-                continue  # 叶子（无蓝图 / 环 / 深度封顶）→ 无溢出
-            if step.type_id not in self_made:
-                continue  # 没有子项产线 → 这件是买来的，不判溢出
-            per_run_out = step.blueprint[1]
-            overflow = step.runs * per_run_out - step.qty
-            if overflow > 0:
+        made = calculate(
+            SqliteBlueprintReader(conn),
+            [Target(int(pid), quantity=int(total_qty), me_level=int(me), key=pid)],
+            build=lambda tid, act: act == ACTIVITY_MANUFACTURING and tid in self_made,
+            me_for=lambda *_, _me=int(me): _me,
+            max_depth=max_depth,
+        )
+        for node in sorted(made.nodes.values(), key=lambda n: (n.depth, n.type_id)):
+            if node.leftover > 0:
                 overflow_details.append(
                     {
-                        "type_id": step.type_id,
-                        "name": _resolve_name(conn, step.type_id),
-                        "needed": step.qty,
-                        "per_run": per_run_out,
-                        "runs": step.runs,
-                        "produced": step.runs * per_run_out,
-                        "overflow": overflow,
+                        "type_id": node.type_id,
+                        "name": _resolve_name(conn, node.type_id),
+                        "needed": node.demand,
+                        "per_run": node.output_qty,
+                        "runs": node.runs,
+                        "produced": node.produced,
+                        "overflow": node.leftover,
                     }
                 )
         overflow_text = _format_overflow(overflow_details)

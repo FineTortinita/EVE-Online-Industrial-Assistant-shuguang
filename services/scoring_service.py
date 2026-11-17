@@ -641,68 +641,33 @@ class ScoringService:
                     runs=runs,
                     parallels=parallels,
                 )
-            # BPC 成本（T2 发明蓝图）：绑定了有 cost_per_run 的 BPC 时，把该值作为本线
-            # 每流程的研究成本（覆盖按市场重算的口径，见 _bound_bpc_costs）。
-            bpc_costs = ScoringService._bound_bpc_costs(getattr(svc, "_db", None), plan_data.get("id"))
-            # 单次路径没有「逐线」维度：取已绑定 BPC 成本的平均值（总量与逐线一致）。
-            # 预调用与下面的正式调用必须传**同一份** research_costs —— 否则预调用会先把
-            # 「无 BPC 成本」的结果写进缓存，正式调用命中旧值（缓存 key 已含 rc 指纹）。
-            _positive_bpc_costs = [c for c in bpc_costs if c > 0]
-            _single_bpc_cost = sum(_positive_bpc_costs) / len(_positive_bpc_costs) if _positive_bpc_costs else 0.0
-            single_research_costs = {type_id: _single_bpc_cost} if _single_bpc_cost > 0 else None
-
-            per_run = svc.calc_manufacturing_score(
-                type_id=type_id,
-                char_config=char_config,
-                bp_me=me,
-                bp_te=te,
-                mat_source_hub=resolved_mat_hub,
-                sell_hub=resolved_sell_hub,
-                facility_tax_pct=fac_tax,
-                price_type_mat=resolved_price_type_mat,
-                price_type_prod=resolved_price_type_prod,
-                structure_bonus=structure_bonus,
-                structure_time_mod=structure_time_mod,
-                structure_mat_saving=structure_mat_saving,
-                system_id=effective_system_id,
-                mat_price_mult=mat_mult,
-                prod_price_mult=prod_mult,
-                research_costs=single_research_costs,
-            )
-            total = ScoringService.calculate_total_metrics(per_run, runs, parallels) or {}
-
-            # 逐线：各并行产线按**各自绑定蓝图**的 ME/TE 独立结算。
-            # 短路条件是「与**计划级**完全一致」——不是「各线彼此一致」：
-            # 绑的 5 张都是 ME8、而计划级写着 10 时也必须走逐线，否则改绑等级不生效。
-            line_levels = [(int(a), int(b)) for a, b in (plan_data.get("line_levels") or [])]
-            if any(pair != (me, te) for pair in line_levels):
-                per_line = [
-                    svc.calc_manufacturing_score(
-                        type_id=type_id,
-                        char_config=char_config,
-                        bp_me=line_me,
-                        bp_te=line_te,
-                        mat_source_hub=resolved_mat_hub,
-                        sell_hub=resolved_sell_hub,
-                        facility_tax_pct=fac_tax,
-                        price_type_mat=resolved_price_type_mat,
-                        price_type_prod=resolved_price_type_prod,
-                        structure_bonus=structure_bonus,
-                        structure_time_mod=structure_time_mod,
-                        structure_mat_saving=structure_mat_saving,
-                        system_id=effective_system_id,
-                        mat_price_mult=mat_mult,
-                        prod_price_mult=prod_mult,
-                        research_costs=(
-                            {type_id: bpc_costs[line_idx]}
-                            if line_idx < len(bpc_costs) and bpc_costs[line_idx] > 0
-                            else None
-                        ),
-                    )
-                    for line_idx, (line_me, line_te) in enumerate(line_levels)
-                ]
-                per_run, total = ScoringService.combine_per_line(per_line, runs)
+            if activity == "reaction":
+                # 反应计划：反应配方 + 精炼建筑倍率（hangar_cfg 已按 activity=reaction 解析），无 ME/逐线绑定
+                per_run = svc.calc_reaction_score(
+                    type_id,
+                    char_config,
+                    mat_source_hub=resolved_mat_hub,
+                    sell_hub=resolved_sell_hub,
+                    facility_tax_pct=fac_tax,
+                    price_type_mat=resolved_price_type_mat,
+                    price_type_prod=resolved_price_type_prod,
+                    system_id=effective_system_id,
+                    structure_bonus=structure_bonus,
+                    structure_time_mod=structure_time_mod,
+                    structure_mat_saving=structure_mat_saving,
+                )
+                total = ScoringService.calculate_total_metrics(per_run, runs, parallels) or {}
             else:
+                # BPC 成本（T2 发明蓝图）：绑定了有 cost_per_run 的 BPC 时，把该值作为本线
+                # 每流程的研究成本（覆盖按市场重算的口径，见 _bound_bpc_costs）。
+                bpc_costs = ScoringService._bound_bpc_costs(getattr(svc, "_db", None), plan_data.get("id"))
+                # 单次路径没有「逐线」维度：取已绑定 BPC 成本的平均值（总量与逐线一致）。
+                # 预调用与下面的正式调用必须传**同一份** research_costs —— 否则预调用会先把
+                # 「无 BPC 成本」的结果写进缓存，正式调用命中旧值（缓存 key 已含 rc 指纹）。
+                _positive_bpc_costs = [c for c in bpc_costs if c > 0]
+                _single_bpc_cost = sum(_positive_bpc_costs) / len(_positive_bpc_costs) if _positive_bpc_costs else 0.0
+                single_research_costs = {type_id: _single_bpc_cost} if _single_bpc_cost > 0 else None
+
                 per_run = svc.calc_manufacturing_score(
                     type_id=type_id,
                     char_config=char_config,
@@ -722,6 +687,58 @@ class ScoringService:
                     research_costs=single_research_costs,
                 )
                 total = ScoringService.calculate_total_metrics(per_run, runs, parallels) or {}
+
+                # 逐线：各并行产线按**各自绑定蓝图**的 ME/TE 独立结算。
+                # 短路条件是「与**计划级**完全一致」——不是「各线彼此一致」：
+                # 绑的 5 张都是 ME8、而计划级写着 10 时也必须走逐线，否则改绑等级不生效。
+                line_levels = [(int(a), int(b)) for a, b in (plan_data.get("line_levels") or [])]
+                if any(pair != (me, te) for pair in line_levels):
+                    per_line = [
+                        svc.calc_manufacturing_score(
+                            type_id=type_id,
+                            char_config=char_config,
+                            bp_me=line_me,
+                            bp_te=line_te,
+                            mat_source_hub=resolved_mat_hub,
+                            sell_hub=resolved_sell_hub,
+                            facility_tax_pct=fac_tax,
+                            price_type_mat=resolved_price_type_mat,
+                            price_type_prod=resolved_price_type_prod,
+                            structure_bonus=structure_bonus,
+                            structure_time_mod=structure_time_mod,
+                            structure_mat_saving=structure_mat_saving,
+                            system_id=effective_system_id,
+                            mat_price_mult=mat_mult,
+                            prod_price_mult=prod_mult,
+                            research_costs=(
+                                {type_id: bpc_costs[line_idx]}
+                                if line_idx < len(bpc_costs) and bpc_costs[line_idx] > 0
+                                else None
+                            ),
+                        )
+                        for line_idx, (line_me, line_te) in enumerate(line_levels)
+                    ]
+                    per_run, total = ScoringService.combine_per_line(per_line, runs)
+                else:
+                    per_run = svc.calc_manufacturing_score(
+                        type_id=type_id,
+                        char_config=char_config,
+                        bp_me=me,
+                        bp_te=te,
+                        mat_source_hub=resolved_mat_hub,
+                        sell_hub=resolved_sell_hub,
+                        facility_tax_pct=fac_tax,
+                        price_type_mat=resolved_price_type_mat,
+                        price_type_prod=resolved_price_type_prod,
+                        structure_bonus=structure_bonus,
+                        structure_time_mod=structure_time_mod,
+                        structure_mat_saving=structure_mat_saving,
+                        system_id=effective_system_id,
+                        mat_price_mult=mat_mult,
+                        prod_price_mult=prod_mult,
+                        research_costs=single_research_costs,
+                    )
+                    total = ScoringService.calculate_total_metrics(per_run, runs, parallels) or {}
         except Exception:
             from core.logger import log
 
