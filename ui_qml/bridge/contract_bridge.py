@@ -189,7 +189,8 @@ class ContractBridge(QObject):
     def setHubIndex(self, index: int) -> None:
         """从常用贸易中心里点一个。"""
         if 0 <= index < len(TRADE_HUBS):
-            self._pick_region(TRADE_HUB_IDS[TRADE_HUBS[index]], self.regionOptions[index])
+            hub = TRADE_HUBS[index]
+            self._pick_region(TRADE_HUB_IDS[hub], hub_options([hub])[0]["label"])
 
     @Slot(str)
     def setRegionQuery(self, text: str) -> None:

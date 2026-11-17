@@ -130,10 +130,10 @@ async def main() -> int:
                 esw.esi_url(path.format(id=char_id)), headers={"Authorization": f"Bearer {access}"}
             ) as resp:
                 body = await resp.json(content_type=None)
-                n = len(body) if isinstance(body, list) else "—"
+                count = str(len(body)) if isinstance(body, list) else "—"
                 pages = resp.headers.get("X-Pages", "1")
                 print(
-                    f"6) {scope}（令牌里{'有' if granted else '没有'}）→ {path}: HTTP {resp.status}，条数 {n}，页数 {pages}"
+                    f"6) {scope}（令牌里{'有' if granted else '没有'}）→ {path}: HTTP {resp.status}，条数 {count}，页数 {pages}"
                 )
                 ok = ok and resp.status == 200
         return 0 if ok else 1

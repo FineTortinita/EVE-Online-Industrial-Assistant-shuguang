@@ -1,9 +1,10 @@
 """真实鼠标拖动必须改变单列，而不是只让整条表头回弹。"""
 
 from pathlib import Path
+from typing import Any
 
 import pytest
-from PySide6.QtCore import QPoint, Qt
+from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtQml import QQmlExpression, qmlContext
 from PySide6.QtQuick import QQuickItem
 from PySide6.QtTest import QTest
@@ -15,14 +16,20 @@ from ui_qml.host import PageHost
 pytestmark = pytest.mark.ui
 
 
-def _find(root: QQuickItem, name: str) -> QQuickItem | None:
+def _find_opt(root: QQuickItem, name: str) -> QQuickItem | None:
     if root.objectName() == name:
         return root
     for child in root.childItems():
-        found = _find(child, name)
+        found = _find_opt(child, name)
         if found is not None:
             return found
     return None
+
+
+def _find(root: QQuickItem, name: str) -> QQuickItem:
+    found = _find_opt(root, name)
+    assert found is not None, name
+    return found
 
 
 @pytest.mark.parametrize("kind", ["plan", "trade", "mfg"])
@@ -32,6 +39,7 @@ def test_drag_changes_only_target_column(qapp: QApplication, kind: str) -> None:
     from ui_qml.models.industry_models import PlanTableModel
     from ui_qml.views.industry.plan_table import PlanTable
 
+    bridge: Any
     if kind == "plan":
         owner = PlanTable()
         model = PlanTableModel([{"id": 1, "product_name": "长名称产品交互验证", "status": "pending", "runs": 1}])
@@ -54,22 +62,26 @@ def test_drag_changes_only_target_column(qapp: QApplication, kind: str) -> None:
         host.show()
         spin(300)
         root = host.rootObject()
+        assert root is not None
         handle = _find(root, f"{kind}Resize{col}")
         neighbor = _find(root, f"{kind}Resize{col + (2 if kind != 'plan' else 1)}")
         table = _find(root, "horizontalScroll").parentItem()
-        cell_width = QQmlExpression(qmlContext(table), table, f"itemAtCell({col}, 0).width")
+        assert table is not None
+        ctx = qmlContext(table)
+        assert ctx is not None
+        cell_width = QQmlExpression(ctx, table, f"itemAtCell({col}, 0).width")
         before, other = cell_width.evaluate()[0], neighbor.property("columnWidth")
         for _ in range(2):
-            start = handle.mapToItem(None, 4, handle.height() / 2).toPoint()
-            QTest.mousePress(host, Qt.LeftButton, Qt.NoModifier, start)
+            start = handle.mapToScene(QPointF(4, handle.height() / 2)).toPoint()
+            QTest.mousePress(host, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, start)
             QTest.mouseMove(host, start + QPoint(75, 0), 30)
-            QTest.mouseRelease(host, Qt.LeftButton, Qt.NoModifier, start + QPoint(75, 0))
+            QTest.mouseRelease(host, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, start + QPoint(75, 0))
             spin(100)
         assert cell_width.evaluate()[0] == pytest.approx(before + 150, abs=2)
         assert handle.property("columnWidth") == pytest.approx(before + 150, abs=2)
         assert neighbor.property("columnWidth") == other
         if kind != "plan":
-            assert _find(root, f"{kind}Resize2") is None
+            assert _find_opt(root, f"{kind}Resize2") is None
         out = Path(".claude/ui-snapshots")
         out.mkdir(parents=True, exist_ok=True)
         host.grab().save(str(out / f"resize-{kind}.png"))
@@ -77,12 +89,13 @@ def test_drag_changes_only_target_column(qapp: QApplication, kind: str) -> None:
         spin(150)
         bar = _find(root, "horizontalScroll")
         table = bar.parentItem()
+        assert table is not None
         before_x = table.property("contentX")
-        start = bar.mapToItem(None, bar.width() * bar.property("size") / 2, bar.height() / 2).toPoint()
-        QTest.mousePress(host, Qt.LeftButton, Qt.NoModifier, start)
-        end = bar.mapToItem(None, bar.width() - 2, bar.height() / 2).toPoint()
+        start = bar.mapToScene(QPointF(bar.width() * bar.property("size") / 2, bar.height() / 2)).toPoint()
+        QTest.mousePress(host, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, start)
+        end = bar.mapToScene(QPointF(bar.width() - 2, bar.height() / 2)).toPoint()
         QTest.mouseMove(host, end, 30)
-        QTest.mouseRelease(host, Qt.LeftButton, Qt.NoModifier, end)
+        QTest.mouseRelease(host, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, end)
         spin(100)
         assert table.property("contentX") > before_x
         host.grab().save(str(out / f"scroll-{kind}.png"))
