@@ -997,6 +997,19 @@ class IndustryPage(QObject):
     def open_char_usage(self):
         CharacterUsageDialog(self).show()
 
+    def open_industry_calc(self):
+        """打开「制造计算」（开明网式，非模态独立窗，单实例复用）；加入规划后刷新计划表。"""
+        from ui_qml.bridge.industry_calc_bridge import IndustryCalcQmlDialog
+        from ui_qml.dialog_host import find_modeless
+
+        dlg = find_modeless(IndustryCalcQmlDialog)
+        if dlg is None:
+            dlg = IndustryCalcQmlDialog(parent=self)
+            dlg.bridge.plansAdded.connect(self.load_plans)
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+
     def open_procurement(self):
         """采购小助手：非模态独立窗口（单实例复用，可置顶，不阻塞主界面）。"""
         from ui_qml.views.procurement_tab import ProcurementDialog

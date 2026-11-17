@@ -352,6 +352,10 @@ class IndustryBridge(QObject):
     def openCharUsage(self) -> None:
         self._page.open_char_usage()
 
+    @Slot()
+    def openIndustryCalc(self) -> None:
+        self._page.open_industry_calc()
+
     # ── 甘特图 ────────────────────────────────────────────────
 
     @Property(list, notify=ganttChanged)

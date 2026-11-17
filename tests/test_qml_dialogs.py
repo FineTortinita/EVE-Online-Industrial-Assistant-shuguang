@@ -93,6 +93,38 @@ def _case_research_cost(monkeypatch):
     return lambda: ResearchCostQmlDialog(_BrokenDb(), 691, "渡鸦级蓝图")
 
 
+def _case_industry_calc(monkeypatch):
+    """制造计算：带一份算好的结果加载，四个页签都有内容（计算本身见 tests/test_industry_calc_service.py）。"""
+    from services import char_config_resolver, inventory_manager
+    from services import industry_calc_service as ics
+    from ui_qml.bridge import industry_calc_bridge as icb
+
+    monkeypatch.setattr(inventory_manager, "get_hangars", lambda: [{"id": 1, "name": "莱塔卢"}])
+    monkeypatch.setattr(char_config_resolver, "get_character_list", lambda: ["main"])
+    job = ics.JobLine(5002, "反应物", "reaction", 1, 1, 1, 40, 200, 160, 5500.0, 0.02, 343.75, {}, 3600.0)
+    top = ics.JobLine(5001, "成品", "manufacturing", 0, 4, 1, 4, 4, 0, 20000.0, 0.01, 1050.0, {}, 7200.0)
+    result = ics.CalcResult(
+        targets=[{"type_id": 5001, "name": "成品", "quantity": 4, "runs": 4, "sell": 1e6, "buy": 9e5}],
+        raws=[ics.RawLine(1001, "三钛合金", "mineral", 400, 5.0, False, False),
+              ics.RawLine(5003, "卫星原料", "moon", 100, 60.0, True, False)],
+        jobs=[top, job],
+        waves={"manufacturing": [[top]], "reaction": [[job]]},
+        material_cost=2000.0, fee_total=1393.75, fee_manufacturing=1050.0, fee_reaction=343.75,
+        fee_parts={"system_cost": 310.0, "facility_tax": 63.75, "scc": 1020.0, "alpha_tax": 0.0},
+        leftover_credit=275.0, revenue_sell=3.8e6, revenue_buy=3.4e6,
+        longest_seconds=7200.0, total_line_seconds=10800.0,
+    )  # fmt: skip
+    monkeypatch.setattr(ics, "run", lambda req, db=None: result)
+
+    def _make():
+        dlg = icb.IndustryCalcQmlDialog()
+        dlg.bridge._targets = [{"type_id": 5001, "name": "成品", "qty": 4}]
+        dlg.bridge.recalc()
+        return dlg
+
+    return _make
+
+
 def _case_invention_batch(monkeypatch):
     """批量发明回填：两行覆盖「有解码器 / 不使用」两种只读列。
 
@@ -269,6 +301,7 @@ _LOADS_CASES: list[tuple[str, Any]] = [
     ("产出总表", "output_factory"),
     ("人物占用情况", "char_usage_factory"),
     ("填料总表", "materials_factory"),
+    ("制造计算", _case_industry_calc),
     ("研究分析", _case_research_cost),
     ("所需蓝图清单", "blueprint_requirements_factory"),
     ("子项并行配置", "child_parallel_factory"),
